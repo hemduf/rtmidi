@@ -6,9 +6,9 @@
 
   var output = {
     name: "Mock Output",
-    sent: null,
+    sent: [],
     send: function (message) {
-      this.sent = Array.prototype.slice.call(message);
+      this.sent.push(Array.prototype.slice.call(message));
     }
   };
 
