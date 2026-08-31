@@ -20,7 +20,7 @@ namespace {
 std::unique_ptr<RtMidiIn> midiIn;
 std::string portNameBuffer;
 
-void midiCallback(double /*deltaTime*/,
+void midiCallback(double deltaTime,
                   std::vector<unsigned char> *message,
                   void *)
 {
@@ -28,7 +28,8 @@ void midiCallback(double /*deltaTime*/,
     return;
 
   std::ostringstream out;
-  out << "MIDI IN  bytes:";
+  out << "MIDI IN  dt=" << std::fixed << std::setprecision(6)
+      << deltaTime << "s  bytes:";
 
   for (std::vector<unsigned char>::const_iterator it = message->begin();
        it != message->end(); ++it) {
@@ -37,10 +38,6 @@ void midiCallback(double /*deltaTime*/,
   }
 
   std::cout << out.str() << std::endl;
-
-  // The current Web MIDI backend reuses its internal message vector.
-  // Clearing it here keeps this monitor focused on the current event.
-  message->clear();
 }
 
 int accessState()
