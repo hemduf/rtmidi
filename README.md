@@ -37,6 +37,8 @@ In some cases, for example to use RtMidi with GS Synth, it may be necessary for 
 
 The CMake build enables the Web MIDI backend by default when RtMidi is configured with the Emscripten toolchain. WebAssembly builds default to a static library.
 
+To build the library only:
+
 ```sh
 emcmake cmake -S . -B build-wasm \
   -DRTMIDI_BUILD_TESTING=OFF
@@ -45,7 +47,49 @@ cmake --build build-wasm
 
 The backend can also be selected explicitly with `-DRTMIDI_API_WEBMIDI=ON`. `RtMidiIn` and `RtMidiOut` then expose `RtMidi::WEB_MIDI_API` and use the browser's `navigator.requestMIDIAccess()` API.
 
+### Web MIDI browser probe
+
+`tests/webmidiprobe.cpp` is the browser/WebAssembly counterpart of `tests/midiprobe.cpp`. It is driven by the custom Emscripten shell in `tests/webmidiprobe.html` and probes the actual Web MIDI input and output ports exposed by the browser.
+
+Build the complete browser test application with:
+
+```sh
+emcmake cmake -S . -B build-wasm \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DRTMIDI_API_JACK=OFF \
+  -DRTMIDI_API_ALSA=OFF \
+  -DRTMIDI_API_WEBMIDI=ON \
+  -DRTMIDI_BUILD_TESTING=ON
+
+cmake --build build-wasm --target webmidiprobe
+```
+
+Emscripten generates the complete browser bundle in `build-wasm/tests/`:
+
+```text
+webmidiprobe.html
+webmidiprobe.js
+webmidiprobe.wasm
+```
+
+Serve that directory over HTTP and open the generated page in a browser with Web MIDI support. For example:
+
+```sh
+python3 -m http.server 8000 --directory build-wasm/tests
+```
+
+Then open `http://localhost:8000/webmidiprobe.html`, click **Request Web MIDI access**, approve the browser permission prompt, and use **Probe MIDI ports** to re-enumerate connected devices.
+
+Do not open the generated HTML directly with a `file://` URL: the `.wasm` module is loaded as a separate resource and should be served by an HTTP server. `localhost` is suitable for local development.
+
 Web MIDI access is permission-based and asynchronous. Applications should wait until the browser permission request has settled before relying on port enumeration. Browser support also requires a context where Web MIDI is available, normally a secure context.
+
+The headless Web MIDI bridge test remains available as `webmidi-smoke` and uses Node with a mocked Web MIDI implementation:
+
+```sh
+cmake --build build-wasm --target webmidi-smoke
+ctest --test-dir build-wasm -R webmidi-smoke --output-on-failure
+```
 
 ## Further reading
 
