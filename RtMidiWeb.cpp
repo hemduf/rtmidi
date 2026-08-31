@@ -18,6 +18,48 @@ using namespace rt::midi;
 
 namespace {
 
+// The historical Web MIDI backend starts requestMIDIAccess() with a success
+// handler only. If the browser rejects that promise, its waiting flag would
+// otherwise remain true forever. Install a narrowly-scoped rejection handler
+// that only consumes DOMException names documented for Web MIDI access.
+struct WebMidiAccessRejectionGuard {
+  WebMidiAccessRejectionGuard()
+  {
+    EM_ASM({
+      if (typeof globalThis.addEventListener !== 'function' ||
+          globalThis.__rtmidi_webmidi_rejection_guard)
+        return;
+
+      globalThis.__rtmidi_webmidi_rejection_guard = true;
+      globalThis.addEventListener('unhandledrejection', function(event) {
+        if (!globalThis._rtmidi_internals_waiting)
+          return;
+
+        var reason = event.reason;
+        var name = reason && reason.name;
+        var webMidiError =
+          name === 'AbortError' ||
+          name === 'InvalidStateError' ||
+          name === 'NotSupportedError' ||
+          name === 'NotAllowedError' ||
+          name === 'SecurityError';
+
+        if (!webMidiError)
+          return;
+
+        globalThis._rtmidi_internals_midi_access = null;
+        globalThis._rtmidi_internals_waiting = false;
+        globalThis._rtmidi_internals_error = reason ? String(reason) : name;
+
+        if (typeof event.preventDefault === 'function')
+          event.preventDefault();
+      });
+    });
+  }
+};
+
+WebMidiAccessRejectionGuard webMidiAccessRejectionGuard;
+
 bool shouldIgnore(const MidiInApi::RtMidiInData &data,
                   const std::uint8_t *bytes,
                   std::int32_t length)
