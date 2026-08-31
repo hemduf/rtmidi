@@ -10,7 +10,6 @@
 
 #include <emscripten.h>
 
-#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -97,17 +96,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE int rtmidi_web_probe()
 
   try {
     std::vector<RtMidi::Api> apis;
-    std::vector<RtMidi::Api> uniqueApis;
     RtMidi::getCompiledApi(apis);
 
     std::cout << "\nCompiled APIs:" << std::endl;
     for (std::vector<RtMidi::Api>::const_iterator it = apis.begin();
-         it != apis.end(); ++it) {
-      if (std::find(uniqueApis.begin(), uniqueApis.end(), *it) == uniqueApis.end()) {
-        uniqueApis.push_back(*it);
-        printApi(*it);
-      }
-    }
+         it != apis.end(); ++it)
+      printApi(*it);
 
     std::cout << "\nCurrent input API: "
               << RtMidi::getApiDisplayName(midiIn->getCurrentApi())
