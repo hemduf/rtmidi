@@ -61,6 +61,30 @@ int sendThreeBytes(unsigned char status,
   return 0;
 }
 
+int panicAllChannels()
+{
+  if (!midiOut || !midiOut->isPortOpen())
+    return 1;
+
+  int result = 0;
+  for (int channel = 0; channel < 16; ++channel) {
+    const unsigned char status = static_cast<unsigned char>(0xB0 | channel);
+
+    // CC 123: All Notes Off.
+    const int notesOffResult = sendThreeBytes(status, 123, 0);
+    if (result == 0 && notesOffResult != 0)
+      result = notesOffResult;
+
+    // CC 120: All Sound Off. This provides a stronger emergency stop for
+    // devices that do not immediately silence voices on CC 123 alone.
+    const int soundOffResult = sendThreeBytes(status, 120, 0);
+    if (result == 0 && soundOffResult != 0)
+      result = soundOffResult;
+  }
+
+  return result;
+}
+
 } // namespace
 
 extern "C" EMSCRIPTEN_KEEPALIVE int webmidiout_access_state()
@@ -130,8 +154,10 @@ extern "C" EMSCRIPTEN_KEEPALIVE int webmidiout_open(int port)
     if (index >= midiOut->getPortCount())
       return 2;
 
-    if (midiOut->isPortOpen())
+    if (midiOut->isPortOpen()) {
+      panicAllChannels();
       midiOut->closePort();
+    }
 
     midiOut->openPort(index);
     std::cout << "Opened MIDI output #" << index << ": "
@@ -150,6 +176,7 @@ extern "C" EMSCRIPTEN_KEEPALIVE void webmidiout_close()
   if (!midiOut || !midiOut->isPortOpen())
     return;
 
+  panicAllChannels();
   midiOut->closePort();
   std::cout << "MIDI output closed." << std::endl;
 }
@@ -201,6 +228,11 @@ extern "C" EMSCRIPTEN_KEEPALIVE int webmidiout_all_notes_off(int channel)
   return sendThreeBytes(static_cast<unsigned char>(0xB0 | (channel - 1)),
                         123,
                         0);
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int webmidiout_panic()
+{
+  return panicAllChannels();
 }
 
 int main()
