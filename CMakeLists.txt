@@ -46,7 +46,7 @@ endif()
 
 # Build Options
 set(RTMIDI_TARGETNAME_UNINSTALL "rt_uninstall" CACHE STRING "Name of 'uninstall' build target")
-option(RTMIDI_BUILD_WEBMIDI_EXAMPLES "Build Web MIDI browser examples." OFF)
+option(RTMIDI_BUILD_WEBMIDI_EXAMPLES "Include Web MIDI browser examples in the default build." OFF)
 
 # API Options
 option(RTMIDI_API_JACK "Compile with JACK support." ${HAVE_JACK})
@@ -304,15 +304,16 @@ if(RTMIDI_BUILD_TESTING)
   endif()
 endif()
 
-# Browser examples are intentionally independent of RTMIDI_BUILD_TESTING so
-# applications can build them without requiring Node or the headless test.
-if(RTMIDI_BUILD_WEBMIDI_EXAMPLES)
-  if(NOT EMSCRIPTEN OR NOT RTMIDI_API_WEBMIDI)
-    message(FATAL_ERROR "RTMIDI_BUILD_WEBMIDI_EXAMPLES requires Emscripten and RTMIDI_API_WEBMIDI=ON")
-  endif()
-
+# Browser targets are always available with the Web MIDI API. By default they
+# are excluded from the aggregate build; RTMIDI_BUILD_WEBMIDI_EXAMPLES=ON opts
+# them into the normal "all" target. Explicit --target builds always work.
+if(RTMIDI_API_WEBMIDI)
   function(rtmidi_add_webmidi_example target source shell exports)
-    add_executable(${target} ${source})
+    if(RTMIDI_BUILD_WEBMIDI_EXAMPLES)
+      add_executable(${target} ${source})
+    else()
+      add_executable(${target} EXCLUDE_FROM_ALL ${source})
+    endif()
     target_link_libraries(${target} PRIVATE ${LIBRTMIDI})
     target_link_options(${target} PRIVATE
       "-sENVIRONMENT=web"
