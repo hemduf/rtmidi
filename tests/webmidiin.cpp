@@ -61,6 +61,22 @@ int accessState()
   });
 }
 
+bool createInput()
+{
+  try {
+    midiIn.reset(new RtMidiIn(RtMidi::WEB_MIDI_API,
+                              "RtMidi Web MIDI Input Monitor"));
+    midiIn->ignoreTypes(false, false, false);
+    midiIn->setCallback(&midiCallback);
+    return true;
+  }
+  catch (RtMidiError &error) {
+    error.printMessage();
+    midiIn.reset();
+    return false;
+  }
+}
+
 } // namespace
 
 extern "C" EMSCRIPTEN_KEEPALIVE int webmidiin_access_state()
@@ -73,17 +89,8 @@ extern "C" EMSCRIPTEN_KEEPALIVE int webmidiin_init()
   if (midiIn)
     return 0;
 
-  try {
-    midiIn.reset(new RtMidiIn(RtMidi::WEB_MIDI_API,
-                              "RtMidi Web MIDI Input Monitor"));
-    midiIn->ignoreTypes(false, false, false);
-    midiIn->setCallback(&midiCallback);
-  }
-  catch (RtMidiError &error) {
-    error.printMessage();
-    midiIn.reset();
+  if (!createInput())
     return 1;
-  }
 
   std::cout << "Web MIDI input access requested." << std::endl;
   return 0;
@@ -127,14 +134,28 @@ extern "C" EMSCRIPTEN_KEEPALIVE int webmidiin_open(int port)
   if (!midiIn || accessState() != 2 || port < 0)
     return 1;
 
+  const unsigned int index = static_cast<unsigned int>(port);
   try {
-    const unsigned int index = static_cast<unsigned int>(port);
     if (index >= midiIn->getPortCount())
       return 2;
 
     if (midiIn->isPortOpen())
       midiIn->closePort();
+  }
+  catch (RtMidiError &error) {
+    error.printMessage();
+    return 3;
+  }
 
+  // Use a fresh RtMidiIn instance for each open operation. Besides making the
+  // example robust to repeated open/close cycles, this resets RtMidi's
+  // first-message timing state so the first event after reopening has dt=0.
+  if (!createInput())
+    return 3;
+
+  try {
+    if (index >= midiIn->getPortCount())
+      return 2;
     midiIn->openPort(index);
     std::cout << "Opened MIDI input #" << index << ": "
               << midiIn->getPortName(index) << std::endl;
