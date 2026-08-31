@@ -289,9 +289,7 @@ if (RTMIDI_BUILD_TESTING)
     add_test(NAME webmidi-smoke
       COMMAND ${NODE_EXECUTABLE} $<TARGET_FILE:webmidi-smoke>)
 
-    # Interactive browser probe, equivalent to midiprobe for Web MIDI.  Setting
-    # the executable suffix to .html asks Emscripten to emit the complete
-    # webmidiprobe.html + webmidiprobe.js + webmidiprobe.wasm bundle.
+    # Interactive browser probe, equivalent to midiprobe for Web MIDI.
     add_executable(webmidiprobe tests/webmidiprobe.cpp)
     target_link_libraries(webmidiprobe PRIVATE ${LIBRTMIDI})
     target_link_options(webmidiprobe PRIVATE
@@ -299,6 +297,28 @@ if (RTMIDI_BUILD_TESTING)
       "-sEXIT_RUNTIME=0"
       "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiprobe.html")
     set_target_properties(webmidiprobe PROPERTIES
+      SUFFIX ".html"
+      RUNTIME_OUTPUT_DIRECTORY tests)
+
+    # Interactive browser MIDI input monitor, equivalent to cmidiin.
+    add_executable(webmidiin tests/webmidiin.cpp)
+    target_link_libraries(webmidiin PRIVATE ${LIBRTMIDI})
+    target_link_options(webmidiin PRIVATE
+      "-sEXPORTED_FUNCTIONS=['_main','_webmidiin_access_state','_webmidiin_init','_webmidiin_port_count','_webmidiin_port_name','_webmidiin_open','_webmidiin_close']"
+      "-sEXIT_RUNTIME=0"
+      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiin.html")
+    set_target_properties(webmidiin PROPERTIES
+      SUFFIX ".html"
+      RUNTIME_OUTPUT_DIRECTORY tests)
+
+    # Interactive browser MIDI output tester, equivalent to midiout.
+    add_executable(webmidiout tests/webmidiout.cpp)
+    target_link_libraries(webmidiout PRIVATE ${LIBRTMIDI})
+    target_link_options(webmidiout PRIVATE
+      "-sEXPORTED_FUNCTIONS=['_main','_webmidiout_access_state','_webmidiout_init','_webmidiout_port_count','_webmidiout_port_name','_webmidiout_open','_webmidiout_close','_webmidiout_note_on','_webmidiout_note_off','_webmidiout_cc','_webmidiout_all_notes_off']"
+      "-sEXIT_RUNTIME=0"
+      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiout.html")
+    set_target_properties(webmidiout PROPERTIES
       SUFFIX ".html"
       RUNTIME_OUTPUT_DIRECTORY tests)
   endif()
