@@ -19,7 +19,7 @@
 </head>
 <body>
   <h1>RtMidi Web MIDI Output Tester</h1>
-  <p>Open a browser Web MIDI output through RtMidi and send notes, control changes and All Notes Off.</p>
+  <p>Open a browser Web MIDI output through RtMidi and send notes, control changes and panic messages.</p>
   <p>Status: <span id="status">Loading WebAssembly...</span></p>
 
   <div class="controls">
@@ -33,7 +33,7 @@
   <div class="controls">
     <label>Channel <input id="channel" type="number" min="1" max="16" value="1"></label>
     <label>Velocity <input id="velocity" type="number" min="0" max="127" value="100"></label>
-    <button id="panic" disabled>All Notes Off</button>
+    <button id="panic" disabled>Panic (all channels)</button>
   </div>
 
   <h2>One-octave keyboard</h2>
@@ -67,6 +67,7 @@
     const clearButton = document.getElementById('clear');
 
     let outputOpen = false;
+    const activePointers = new Map();
 
     function appendLog(text) {
       output.textContent += text + '\n';
@@ -88,20 +89,28 @@
       return 'Unknown state (' + value + ')';
     }
 
-    function updateState() {
-      const value = state();
+    function updateControls(value = state()) {
+      const ready = value === 2;
+      const hasPorts = ports.options.length > 0;
+
       statusNode.textContent = stateText(value);
-      refreshButton.disabled = value !== 2;
+      refreshButton.disabled = !ready || outputOpen;
+      ports.disabled = !ready || outputOpen || !hasPorts;
+      openButton.disabled = !ready || outputOpen || !hasPorts;
+      closeButton.disabled = !outputOpen;
+      panicButton.disabled = !outputOpen;
+      sendCcButton.disabled = !outputOpen;
+      keyboard.querySelectorAll('button').forEach(button => {
+        button.disabled = !outputOpen;
+      });
+
       return value;
     }
 
-    function updateSendControls() {
-      panicButton.disabled = !outputOpen;
-      sendCcButton.disabled = !outputOpen;
-      keyboard.querySelectorAll('button').forEach(button => { button.disabled = !outputOpen; });
-    }
-
     function refreshPorts() {
+      if (outputOpen)
+        return;
+
       ports.innerHTML = '';
       const count = call('webmidiout_port_count');
       for (let i = 0; i < count; ++i) {
@@ -110,14 +119,13 @@
         option.textContent = i + ': ' + call('webmidiout_port_name', 'string', ['number'], [i]);
         ports.appendChild(option);
       }
-      ports.disabled = count === 0;
-      openButton.disabled = count === 0;
       appendLog('Found ' + count + ' MIDI output port(s).');
+      updateControls(2);
     }
 
     async function waitForAccess() {
       for (let i = 0; i < 300; ++i) {
-        const value = updateState();
+        const value = updateControls();
         if (value === 2) {
           refreshPorts();
           requestButton.disabled = true;
@@ -150,9 +158,8 @@
       const result = call('webmidiout_open', 'number', ['number'], [index]);
       if (result === 0) {
         outputOpen = true;
-        closeButton.disabled = false;
-        updateState();
-        updateSendControls();
+        activePointers.clear();
+        updateControls(2);
       } else {
         appendLog('[error] Could not open MIDI output #' + index + ' (code ' + result + ')');
       }
@@ -160,14 +167,32 @@
 
     closeButton.addEventListener('click', () => {
       call('webmidiout_close', null);
+      activePointers.clear();
       outputOpen = false;
-      closeButton.disabled = true;
-      updateState();
-      updateSendControls();
+      updateControls(2);
     });
 
     function bounded(input, min, max) {
-      return Math.max(min, Math.min(max, Number(input.value)));
+      let value = Number(input.value);
+      if (!Number.isFinite(value))
+        value = min;
+      value = Math.round(Math.max(min, Math.min(max, value)));
+      input.value = value;
+      return value;
+    }
+
+    function panic(logResult = true) {
+      if (!outputOpen)
+        return 0;
+
+      const result = call('webmidiout_panic');
+      activePointers.clear();
+      if (logResult) {
+        appendLog(result === 0
+          ? 'Panic: All Notes Off + All Sound Off on all 16 channels'
+          : '[error] Panic failed (code ' + result + ')');
+      }
+      return result;
     }
 
     const noteNames = ['C4', 'C#4', 'D4', 'D#4', 'E4', 'F4', 'F#4', 'G4', 'G#4', 'A4', 'A#4', 'B4', 'C5'];
@@ -178,32 +203,49 @@
       button.textContent = name + '\n' + note;
       button.disabled = true;
 
-      const noteOn = event => {
+      function noteOn(event) {
         event.preventDefault();
-        if (!outputOpen) return;
+        if (!outputOpen || activePointers.has(event.pointerId))
+          return false;
+
         const channel = bounded(channelInput, 1, 16);
         const velocity = bounded(velocityInput, 0, 127);
-        call('webmidiout_note_on', 'number', ['number', 'number', 'number'], [channel, note, velocity]);
-        appendLog('Note On  ch=' + channel + ' note=' + note + ' velocity=' + velocity);
-      };
+        const result = call('webmidiout_note_on', 'number',
+          ['number', 'number', 'number'], [channel, note, velocity]);
+        if (result !== 0) {
+          appendLog('[error] Note On failed (code ' + result + ')');
+          return false;
+        }
 
-      const noteOff = event => {
+        activePointers.set(event.pointerId, { note, channel });
+        appendLog('Note On  ch=' + channel + ' note=' + note + ' velocity=' + velocity);
+        return true;
+      }
+
+      function noteOff(event) {
         event.preventDefault();
-        if (!outputOpen) return;
-        const channel = bounded(channelInput, 1, 16);
-        call('webmidiout_note_off', 'number', ['number', 'number', 'number'], [channel, note, 0]);
-        appendLog('Note Off ch=' + channel + ' note=' + note);
-      };
+        const active = activePointers.get(event.pointerId);
+        if (!active)
+          return;
+
+        activePointers.delete(event.pointerId);
+        if (!outputOpen)
+          return;
+
+        const result = call('webmidiout_note_off', 'number',
+          ['number', 'number', 'number'], [active.channel, active.note, 0]);
+        appendLog(result === 0
+          ? 'Note Off ch=' + active.channel + ' note=' + active.note
+          : '[error] Note Off failed (code ' + result + ')');
+      }
 
       button.addEventListener('pointerdown', event => {
-        button.setPointerCapture(event.pointerId);
-        noteOn(event);
+        if (noteOn(event))
+          button.setPointerCapture(event.pointerId);
       });
       button.addEventListener('pointerup', noteOff);
       button.addEventListener('pointercancel', noteOff);
-      button.addEventListener('lostpointercapture', event => {
-        if (event.buttons !== 0) noteOff(event);
-      });
+      button.addEventListener('lostpointercapture', noteOff);
       keyboard.appendChild(button);
     });
 
@@ -217,10 +259,14 @@
         : '[error] Could not send CC (code ' + result + ')');
     });
 
-    panicButton.addEventListener('click', () => {
-      const channel = bounded(channelInput, 1, 16);
-      const result = call('webmidiout_all_notes_off', 'number', ['number'], [channel]);
-      appendLog(result === 0 ? 'All Notes Off ch=' + channel : '[error] All Notes Off failed (code ' + result + ')');
+    panicButton.addEventListener('click', () => panic(true));
+
+    // Losing focus is a common way for pointer-up events to be missed. Panic
+    // immediately so a browser focus change cannot leave notes sounding.
+    window.addEventListener('blur', () => panic(false));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden)
+        panic(false);
     });
 
     clearButton.addEventListener('click', () => { output.textContent = ''; });
@@ -229,9 +275,8 @@
       print: (...args) => appendLog(args.join(' ')),
       printErr: (...args) => appendLog('[error] ' + args.join(' ')),
       onRuntimeInitialized: () => {
-        const value = updateState();
+        const value = updateControls();
         requestButton.disabled = value === -2;
-        updateSendControls();
       }
     };
   </script>
