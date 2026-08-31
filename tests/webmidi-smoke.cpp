@@ -99,7 +99,8 @@ int main()
   if (std::fabs(received[1].timeStamp - 0.0125) > 1.0e-9)
     return 11;
 
-  // Timing messages are ignored by default.
+  // Timing messages are ignored by default. Their elapsed time must be added
+  // to the next message that is actually delivered to the user.
   inject(clock[0], 0, 0, 1, 1020.0);
   if (received.size() != 2)
     return 12;
@@ -108,34 +109,39 @@ int main()
   inject(clock[0], 0, 0, 1, 1030.0);
   if (received.size() != 3 || !equals(received.back().bytes, clock, 1))
     return 13;
+  if (std::fabs(received.back().timeStamp - 0.0175) > 1.0e-9)
+    return 14;
 
   input.closePort();
   if (input.isPortOpen())
-    return 14;
+    return 15;
 
-  // With no user callback, Web MIDI must feed the normal RtMidi queue.
+  // With no user callback, Web MIDI must feed the normal RtMidi queue. The
+  // first delivered message of a fresh input instance has a zero delta time.
   RtMidiIn queuedInput(RtMidi::WEB_MIDI_API);
   queuedInput.openPort(0);
   inject(noteOn[0], 64, 90, 3, 1040.0);
 
   std::vector<unsigned char> queuedMessage;
-  queuedInput.getMessage(&queuedMessage);
+  const double queuedTimeStamp = queuedInput.getMessage(&queuedMessage);
   const unsigned char queuedExpected[] = {0x90, 64, 90};
   if (!equals(queuedMessage, queuedExpected, sizeof(queuedExpected)))
-    return 15;
+    return 16;
+  if (std::fabs(queuedTimeStamp) > 1.0e-12)
+    return 17;
   queuedInput.closePort();
 
   RtMidiOut output(RtMidi::WEB_MIDI_API);
   if (output.getCurrentApi() != RtMidi::WEB_MIDI_API)
-    return 16;
-  if (output.getPortCount() != 1)
-    return 17;
-  if (output.getPortName(0) != "Mock Output")
     return 18;
+  if (output.getPortCount() != 1)
+    return 19;
+  if (output.getPortName(0) != "Mock Output")
+    return 20;
 
   output.openPort(0);
   if (!output.isPortOpen())
-    return 19;
+    return 21;
 
   const unsigned char cc[] = {0xB0, 1, 64};
   output.sendMessage(noteOff, sizeof(noteOff));
@@ -149,11 +155,11 @@ int main()
                sent[1].length === 3 &&
                sent[1][0] === 0xB0 && sent[1][1] === 1 && sent[1][2] === 64 ? 1 : 0;
       }))
-    return 20;
+    return 22;
 
   output.closePort();
   if (output.isPortOpen())
-    return 21;
+    return 23;
 
   return 0;
 }
