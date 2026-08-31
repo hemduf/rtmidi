@@ -89,12 +89,17 @@ jobs:
         -DRTMIDI_API_ALSA=OFF
         -DRTMIDI_API_WEBMIDI=ON
         -DRTMIDI_BUILD_TESTING=ON
-    - name: Build Web MIDI tests and browser probe
-      run: cmake --build bld-webmidi --target webmidi-smoke webmidiprobe --parallel
-    - name: Verify WebAssembly browser bundle
+    - name: Build Web MIDI tests and browser examples
+      run: >
+        cmake --build bld-webmidi
+        --target webmidi-smoke webmidiprobe webmidiin webmidiout
+        --parallel
+    - name: Verify WebAssembly browser bundles
       run: |
-        test -f bld-webmidi/tests/webmidiprobe.html
-        test -f bld-webmidi/tests/webmidiprobe.js
-        test -f bld-webmidi/tests/webmidiprobe.wasm
+        for example in webmidiprobe webmidiin webmidiout; do
+          test -f "bld-webmidi/tests/${example}.html"
+          test -f "bld-webmidi/tests/${example}.js"
+          test -f "bld-webmidi/tests/${example}.wasm"
+        done
     - name: Test Web MIDI bridge
       run: ctest --test-dir bld-webmidi -R webmidi-smoke --output-on-failure
