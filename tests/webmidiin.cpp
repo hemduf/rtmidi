@@ -20,7 +20,7 @@ namespace {
 std::unique_ptr<RtMidiIn> midiIn;
 std::string portNameBuffer;
 
-void midiCallback(double deltaTime,
+void midiCallback(double /*deltaTime*/,
                   std::vector<unsigned char> *message,
                   void *)
 {
@@ -28,8 +28,7 @@ void midiCallback(double deltaTime,
     return;
 
   std::ostringstream out;
-  out << "MIDI IN  dt=" << std::fixed << std::setprecision(6)
-      << deltaTime << "s  bytes:";
+  out << "MIDI IN  bytes:";
 
   for (std::vector<unsigned char>::const_iterator it = message->begin();
        it != message->end(); ++it) {
