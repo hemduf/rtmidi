@@ -249,10 +249,13 @@ target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS}
                              PRIVATE ${LINKLIBS})
 
 # The Web MIDI input bridge invokes Module.ccall() from EM_ASM. Modern
-# Emscripten does not export runtime helpers by default, so make this usage
-# requirement propagate to applications linking the static RtMidi target.
+# Emscripten does not export runtime helpers by default. The undefined-symbol
+# linker request also guarantees that RtMidiWeb.cpp is extracted from a static
+# archive even though JavaScript refers to the callback only by name.
 if(RTMIDI_API_WEBMIDI)
-  target_link_options(rtmidi INTERFACE "-sEXPORTED_RUNTIME_METHODS=ccall")
+  target_link_options(rtmidi INTERFACE
+    "-sEXPORTED_RUNTIME_METHODS=ccall"
+    "-Wl,-u,rtmidi_onMidiMessageProc")
 endif()
 
 if(RTMIDI_BUILD_MODULES)
