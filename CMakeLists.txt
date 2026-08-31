@@ -188,15 +188,11 @@ if(RTMIDI_API_WEBMIDI)
   list(APPEND API_LIST "web")
   list(APPEND rtmidi_SOURCES RtMidiWeb.cpp)
 
-  # RtMidi.cpp contains the historical Web MIDI entry points. Keep the
-  # implementation source intact but rename those legacy symbols in that
-  # translation unit so RtMidiWeb.cpp can provide the corrected public entry
-  # points used by JavaScript and the C/C++ API.
+  # RtMidi.cpp contains the historical exported Web MIDI callback. Rename only
+  # that free symbol in the legacy translation unit so RtMidiWeb.cpp can supply
+  # corrected input dispatch without changing any class declarations.
   set_property(SOURCE RtMidi.cpp APPEND PROPERTY COMPILE_DEFINITIONS
-    "rtmidi_onMidiMessageProc=rtmidi_onMidiMessageProc_legacy"
-    "getCompiledApi=getCompiledApiLegacy")
-  set_property(SOURCE rtmidi_c.cpp APPEND PROPERTY COMPILE_DEFINITIONS
-    "rtmidi_get_compiled_api=rtmidi_get_compiled_api_legacy")
+    "rtmidi_onMidiMessageProc=rtmidi_onMidiMessageProc_legacy")
 endif()
 
 # pthread
