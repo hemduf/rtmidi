@@ -74,6 +74,7 @@ jobs:
         && make V=1
 
   WebMIDI:
+    name: WebMIDI backend
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v6
@@ -89,17 +90,52 @@ jobs:
         -DRTMIDI_API_ALSA=OFF
         -DRTMIDI_API_WEBMIDI=ON
         -DRTMIDI_BUILD_TESTING=ON
-    - name: Build Web MIDI tests and browser examples
-      run: >
-        cmake --build bld-webmidi
-        --target webmidi-smoke webmidiprobe webmidiin webmidiout
-        --parallel
-    - name: Verify WebAssembly browser bundles
-      run: |
-        for example in webmidiprobe webmidiin webmidiout; do
-          test -f "bld-webmidi/tests/${example}.html"
-          test -f "bld-webmidi/tests/${example}.js"
-          test -f "bld-webmidi/tests/${example}.wasm"
-        done
+    - name: Build Web MIDI smoke test
+      run: cmake --build bld-webmidi --target webmidi-smoke --parallel
     - name: Test Web MIDI bridge
       run: ctest --test-dir bld-webmidi -R webmidi-smoke --output-on-failure
+
+  WebMIDIExamples:
+    name: WebMIDI example / ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - webmidiprobe
+          - webmidiin
+          - webmidiout
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup Emscripten
+      uses: emscripten-core/setup-emsdk@v15
+    - name: Configure Web MIDI build
+      run: >
+        emcmake cmake -S . -B bld-webmidi
+        -DBUILD_SHARED_LIBS=OFF
+        -DRTMIDI_API_JACK=OFF
+        -DRTMIDI_API_ALSA=OFF
+        -DRTMIDI_API_WEBMIDI=ON
+        -DRTMIDI_BUILD_TESTING=ON
+    - name: Build ${{ matrix.example }}
+      run: cmake --build bld-webmidi --target ${{ matrix.example }} --parallel
+    - name: Validate ${{ matrix.example }} browser bundle
+      shell: bash
+      run: |
+        set -euo pipefail
+        for extension in html js wasm; do
+          file="bld-webmidi/tests/${{ matrix.example }}.${extension}"
+          test -s "$file"
+          echo "validated $file ($(wc -c < "$file") bytes)"
+        done
+    - name: Upload ${{ matrix.example }} browser bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.example }}-wasm
+        if-no-files-found: error
+        path: |
+          bld-webmidi/tests/${{ matrix.example }}.html
+          bld-webmidi/tests/${{ matrix.example }}.js
+          bld-webmidi/tests/${{ matrix.example }}.wasm
