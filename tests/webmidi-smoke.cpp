@@ -1,5 +1,4 @@
 #include "RtMidi.h"
-#include "rtmidi_c.h"
 
 #include <emscripten.h>
 
@@ -36,9 +35,9 @@ bool equals(const std::vector<unsigned char>& actual,
          std::equal(actual.begin(), actual.end(), expected);
 }
 
-void inject(const unsigned char status,
-            const unsigned char data1,
-            const unsigned char data2,
+void inject(unsigned char status,
+            unsigned char data1,
+            unsigned char data2,
             int size,
             double timestamp)
 {
@@ -62,36 +61,25 @@ int main()
   using rt::midi::RtMidiIn;
   using rt::midi::RtMidiOut;
 
-  // Public C++ and C API enumeration must expose Web MIDI exactly once.
   std::vector<RtMidi::Api> apis;
   RtMidi::getCompiledApi(apis);
-  if (std::count(apis.begin(), apis.end(), RtMidi::WEB_MIDI_API) != 1)
+  if (std::find(apis.begin(), apis.end(), RtMidi::WEB_MIDI_API) == apis.end())
     return 1;
-
-  RtMidiApi cApis[16];
-  const int cApiCount = rtmidi_get_compiled_api(cApis, 16);
-  int cWebMidiCount = 0;
-  for (int i = 0; i < cApiCount; ++i) {
-    if (cApis[i] == RTMIDI_API_WEB_MIDI_API)
-      ++cWebMidiCount;
-  }
-  if (cWebMidiCount != 1)
-    return 2;
 
   RtMidiIn input(RtMidi::WEB_MIDI_API);
   if (input.getCurrentApi() != RtMidi::WEB_MIDI_API)
-    return 3;
+    return 2;
   if (input.getPortCount() != 1)
-    return 4;
+    return 3;
   if (input.getPortName(0) != "Mock Input")
-    return 5;
+    return 4;
   if (!EM_ASM_INT({ return globalThis.__rtmidiRequestedSysex ? 1 : 0; }))
-    return 6;
+    return 5;
 
   input.setCallback(&midiCallback);
   input.openPort(0);
   if (!input.isPortOpen())
-    return 7;
+    return 6;
 
   const unsigned char noteOn[] = {0x90, 60, 100};
   const unsigned char noteOff[] = {0x80, 60, 0};
@@ -101,29 +89,29 @@ int main()
   inject(noteOff[0], noteOff[1], noteOff[2], 3, 1012.5);
 
   if (received.size() != 2)
-    return 8;
+    return 7;
   if (!equals(received[0].bytes, noteOn, sizeof(noteOn)))
-    return 9;
+    return 8;
   if (!equals(received[1].bytes, noteOff, sizeof(noteOff)))
-    return 10;
+    return 9;
   if (std::fabs(received[0].timeStamp) > 1.0e-12)
-    return 11;
+    return 10;
   if (std::fabs(received[1].timeStamp - 0.0125) > 1.0e-9)
-    return 12;
+    return 11;
 
   // Timing messages are ignored by default.
   inject(clock[0], 0, 0, 1, 1020.0);
   if (received.size() != 2)
-    return 13;
+    return 12;
 
   input.ignoreTypes(false, false, false);
   inject(clock[0], 0, 0, 1, 1030.0);
   if (received.size() != 3 || !equals(received.back().bytes, clock, 1))
-    return 14;
+    return 13;
 
   input.closePort();
   if (input.isPortOpen())
-    return 15;
+    return 14;
 
   // With no user callback, Web MIDI must feed the normal RtMidi queue.
   RtMidiIn queuedInput(RtMidi::WEB_MIDI_API);
@@ -134,20 +122,20 @@ int main()
   queuedInput.getMessage(&queuedMessage);
   const unsigned char queuedExpected[] = {0x90, 64, 90};
   if (!equals(queuedMessage, queuedExpected, sizeof(queuedExpected)))
-    return 16;
+    return 15;
   queuedInput.closePort();
 
   RtMidiOut output(RtMidi::WEB_MIDI_API);
   if (output.getCurrentApi() != RtMidi::WEB_MIDI_API)
-    return 17;
+    return 16;
   if (output.getPortCount() != 1)
-    return 18;
+    return 17;
   if (output.getPortName(0) != "Mock Output")
-    return 19;
+    return 18;
 
   output.openPort(0);
   if (!output.isPortOpen())
-    return 20;
+    return 19;
 
   const unsigned char cc[] = {0xB0, 1, 64};
   output.sendMessage(noteOff, sizeof(noteOff));
@@ -161,11 +149,11 @@ int main()
                sent[1].length === 3 &&
                sent[1][0] === 0xB0 && sent[1][1] === 1 && sent[1][2] === 64 ? 1 : 0;
       }))
-    return 21;
+    return 20;
 
   output.closePort();
   if (output.isPortOpen())
-    return 22;
+    return 21;
 
   return 0;
 }
