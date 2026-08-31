@@ -47,11 +47,15 @@ cmake --build build-wasm
 
 The backend can also be selected explicitly with `-DRTMIDI_API_WEBMIDI=ON`. `RtMidiIn` and `RtMidiOut` then expose `RtMidi::WEB_MIDI_API` and use the browser's `navigator.requestMIDIAccess()` API.
 
-### Web MIDI browser probe
+### Browser examples
 
-`tests/webmidiprobe.cpp` is the browser/WebAssembly counterpart of `tests/midiprobe.cpp`. It is driven by the custom Emscripten shell in `tests/webmidiprobe.html` and probes the actual Web MIDI input and output ports exposed by the browser.
+Three browser applications are provided in `tests/`:
 
-Build the complete browser test application with:
+- `webmidiprobe`: WebAssembly counterpart of `midiprobe`; enumerates compiled APIs and all available MIDI inputs and outputs.
+- `webmidiin`: interactive MIDI input monitor; selects a real Web MIDI input and displays incoming MIDI messages through an RtMidi callback.
+- `webmidiout`: interactive MIDI output tester; selects a real Web MIDI output and sends notes from a one-octave keyboard, Control Change messages, and All Notes Off.
+
+Configure and build all three applications with:
 
 ```sh
 emcmake cmake -S . -B build-wasm \
@@ -61,30 +65,47 @@ emcmake cmake -S . -B build-wasm \
   -DRTMIDI_API_WEBMIDI=ON \
   -DRTMIDI_BUILD_TESTING=ON
 
-cmake --build build-wasm --target webmidiprobe
+cmake --build build-wasm \
+  --target webmidiprobe webmidiin webmidiout
 ```
 
-Emscripten generates the complete browser bundle in `build-wasm/tests/`:
+Each target produces a complete Emscripten browser bundle in `build-wasm/tests/`:
 
 ```text
 webmidiprobe.html
 webmidiprobe.js
 webmidiprobe.wasm
+
+webmidiin.html
+webmidiin.js
+webmidiin.wasm
+
+webmidiout.html
+webmidiout.js
+webmidiout.wasm
 ```
 
-Serve that directory over HTTP and open the generated page in a browser with Web MIDI support. For example:
+Serve the directory over HTTP:
 
 ```sh
 python3 -m http.server 8000 --directory build-wasm/tests
 ```
 
-Then open `http://localhost:8000/webmidiprobe.html`, click **Request Web MIDI access**, approve the browser permission prompt, and use **Probe MIDI ports** to re-enumerate connected devices.
+Then open one of:
 
-Do not open the generated HTML directly with a `file://` URL: the `.wasm` module is loaded as a separate resource and should be served by an HTTP server. `localhost` is suitable for local development.
+```text
+http://localhost:8000/webmidiprobe.html
+http://localhost:8000/webmidiin.html
+http://localhost:8000/webmidiout.html
+```
 
-Web MIDI access is permission-based and asynchronous. Applications should wait until the browser permission request has settled before relying on port enumeration. Browser support also requires a context where Web MIDI is available, normally a secure context.
+Each application requests Web MIDI access from an explicit browser button and waits for the asynchronous permission request before enumerating ports. `webmidiin` lets you refresh the input list and open a selected port for live monitoring. `webmidiout` lets you refresh the output list, open a selected port, play notes, send CC messages, and send MIDI CC 123 (All Notes Off).
 
-The headless Web MIDI bridge test remains available as `webmidi-smoke` and uses Node with a mocked Web MIDI implementation:
+Do not open the generated HTML directly with a `file://` URL: the `.wasm` module is loaded as a separate resource and should be served by an HTTP server. `localhost` is suitable for local development. Web MIDI browser support normally also requires a secure context.
+
+### Headless Web MIDI regression test
+
+The `webmidi-smoke` target uses Node with a mocked Web MIDI implementation to cover API selection, port enumeration, input callback wiring, output messages, and close semantics without requiring physical MIDI hardware:
 
 ```sh
 cmake --build build-wasm --target webmidi-smoke
