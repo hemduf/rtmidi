@@ -281,7 +281,7 @@ if (RTMIDI_BUILD_TESTING)
     add_executable(webmidi-smoke tests/webmidi-smoke.cpp)
     target_link_libraries(webmidi-smoke PRIVATE ${LIBRTMIDI})
     target_link_options(webmidi-smoke PRIVATE
-      "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidi-pre.js")
+      "--pre-js" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidi-pre.js")
     set_target_properties(webmidi-smoke PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY tests)
     add_test(NAME webmidi-smoke
