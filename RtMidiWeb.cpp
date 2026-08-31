@@ -47,12 +47,31 @@ extern "C" void EMSCRIPTEN_KEEPALIVE rtmidi_onMidiMessageProc(
     std::int32_t length,
     double deltaMilliseconds)
 {
-  if (!data || shouldIgnore(*data, inputBytes, length))
+  if (!data || !inputBytes || length <= 0)
     return;
 
   MidiInApi::MidiMessage &message = data->message;
+  const double deltaSeconds = deltaMilliseconds * 0.001;
+
+  // RtMidi timestamps measure time since the previous message delivered to the
+  // user. Keep accumulating deltas while filtered events are skipped. If all
+  // events before the first delivered message are filtered, the first visible
+  // message still correctly receives a timestamp of zero.
+  if (shouldIgnore(*data, inputBytes, length)) {
+    if (!data->firstMessage)
+      message.timeStamp += deltaSeconds;
+    return;
+  }
+
+  if (data->firstMessage) {
+    data->firstMessage = false;
+    message.timeStamp = 0.0;
+  }
+  else {
+    message.timeStamp += deltaSeconds;
+  }
+
   message.bytes.assign(inputBytes, inputBytes + length);
-  message.timeStamp = deltaMilliseconds * 0.001;
 
   if (data->usingCallback) {
     RtMidiIn::RtMidiCallback callback =
@@ -66,6 +85,7 @@ extern "C" void EMSCRIPTEN_KEEPALIVE rtmidi_onMidiMessageProc(
 
   // The queue stores a copy and callbacks must observe exactly one message.
   message.bytes.clear();
+  message.timeStamp = 0.0;
 }
 
 #endif // __WEB_MIDI_API__
