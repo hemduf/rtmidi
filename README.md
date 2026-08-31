@@ -41,35 +41,40 @@ To build the library only:
 
 ```sh
 emcmake cmake -S . -B build-wasm \
-  -DRTMIDI_BUILD_TESTING=OFF
+  -DRTMIDI_BUILD_TESTING=OFF \
+  -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=OFF
 cmake --build build-wasm
 ```
 
 The backend can also be selected explicitly with `-DRTMIDI_API_WEBMIDI=ON`. `RtMidiIn` and `RtMidiOut` then expose `RtMidi::WEB_MIDI_API` and use the browser's `navigator.requestMIDIAccess()` API.
+
+Web MIDI input follows the normal RtMidi contract: callback messages contain one event at a time, timestamps are delta times expressed in seconds, `ignoreTypes()` is honored, and applications that do not install a callback can use `getMessage()` through the standard RtMidi queue.
 
 ### Browser examples
 
 Three browser applications are provided in `tests/`:
 
 - `webmidiprobe`: WebAssembly counterpart of `midiprobe`; enumerates compiled APIs and all available MIDI inputs and outputs.
-- `webmidiin`: interactive MIDI input monitor; selects a real Web MIDI input and displays incoming MIDI messages through an RtMidi callback.
-- `webmidiout`: interactive MIDI output tester; selects a real Web MIDI output and sends notes from a one-octave keyboard, Control Change messages, and All Notes Off.
+- `webmidiin`: interactive MIDI input monitor; selects a real Web MIDI input and displays incoming MIDI messages and delta timestamps through an RtMidi callback.
+- `webmidiout`: interactive MIDI output tester; selects a real Web MIDI output and sends notes from a one-octave keyboard, Control Change messages, and a panic command covering all 16 channels.
 
-Configure and build all three applications with:
+The browser examples are independent from `RTMIDI_BUILD_TESTING`; building them does not require Node. Configure and build all three applications with:
 
 ```sh
-emcmake cmake -S . -B build-wasm \
+emcmake cmake -S . -B build-wasm-examples \
+  -DCMAKE_BUILD_TYPE=Release \
   -DBUILD_SHARED_LIBS=OFF \
   -DRTMIDI_API_JACK=OFF \
   -DRTMIDI_API_ALSA=OFF \
   -DRTMIDI_API_WEBMIDI=ON \
-  -DRTMIDI_BUILD_TESTING=ON
+  -DRTMIDI_BUILD_TESTING=OFF \
+  -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=ON
 
-cmake --build build-wasm \
+cmake --build build-wasm-examples \
   --target webmidiprobe webmidiin webmidiout
 ```
 
-Each target produces a complete Emscripten browser bundle in `build-wasm/tests/`:
+Each target produces a complete Emscripten browser bundle in `build-wasm-examples/tests/`:
 
 ```text
 webmidiprobe.html
@@ -88,7 +93,7 @@ webmidiout.wasm
 Serve the directory over HTTP:
 
 ```sh
-python3 -m http.server 8000 --directory build-wasm/tests
+python3 -m http.server 8000 --directory build-wasm-examples/tests
 ```
 
 Then open one of:
@@ -99,17 +104,26 @@ http://localhost:8000/webmidiin.html
 http://localhost:8000/webmidiout.html
 ```
 
-Each application requests Web MIDI access from an explicit browser button and waits for the asynchronous permission request before enumerating ports. `webmidiin` lets you refresh the input list and open a selected port for live monitoring. `webmidiout` lets you refresh the output list, open a selected port, play notes, send CC messages, and send MIDI CC 123 (All Notes Off).
+Each application requests Web MIDI access from an explicit browser button and waits for the asynchronous permission request before enumerating ports. `webmidiin` locks the selected port while it is listening. `webmidiout` tracks the channel used for every active pointer so changing the channel while holding a note cannot leave it stuck; closing the output, changing ports, losing browser focus, or pressing **Panic** sends All Notes Off (CC 123) and All Sound Off (CC 120) on all 16 channels.
 
 Do not open the generated HTML directly with a `file://` URL: the `.wasm` module is loaded as a separate resource and should be served by an HTTP server. `localhost` is suitable for local development. Web MIDI browser support normally also requires a secure context.
 
 ### Headless Web MIDI regression test
 
-The `webmidi-smoke` target uses Node with a mocked Web MIDI implementation to cover API selection, port enumeration, input callback wiring, output messages, and close semantics without requiring physical MIDI hardware:
+The `webmidi-smoke` target uses Node with a mocked Web MIDI implementation. It covers C and C++ API enumeration, port enumeration, multiple input events, delta timestamps, `ignoreTypes()`, callback delivery, queued `getMessage()` delivery, multiple output messages, and close semantics without requiring physical MIDI hardware.
 
 ```sh
-cmake --build build-wasm --target webmidi-smoke
-ctest --test-dir build-wasm -R webmidi-smoke --output-on-failure
+emcmake cmake -S . -B build-wasm-tests \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DRTMIDI_API_JACK=OFF \
+  -DRTMIDI_API_ALSA=OFF \
+  -DRTMIDI_API_WEBMIDI=ON \
+  -DRTMIDI_BUILD_TESTING=ON \
+  -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=OFF
+
+cmake --build build-wasm-tests --target webmidi-smoke
+ctest --test-dir build-wasm-tests -R '^webmidi-smoke$' --output-on-failure
 ```
 
 ## Further reading
