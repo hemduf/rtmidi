@@ -278,6 +278,8 @@ if (RTMIDI_BUILD_TESTING)
 
   if(RTMIDI_API_WEBMIDI)
     find_program(NODE_EXECUTABLE node REQUIRED)
+
+    # Headless regression test using a mocked Web MIDI implementation.
     add_executable(webmidi-smoke tests/webmidi-smoke.cpp)
     target_link_libraries(webmidi-smoke PRIVATE ${LIBRTMIDI})
     target_link_options(webmidi-smoke PRIVATE
@@ -286,6 +288,19 @@ if (RTMIDI_BUILD_TESTING)
       RUNTIME_OUTPUT_DIRECTORY tests)
     add_test(NAME webmidi-smoke
       COMMAND ${NODE_EXECUTABLE} $<TARGET_FILE:webmidi-smoke>)
+
+    # Interactive browser probe, equivalent to midiprobe for Web MIDI.  Setting
+    # the executable suffix to .html asks Emscripten to emit the complete
+    # webmidiprobe.html + webmidiprobe.js + webmidiprobe.wasm bundle.
+    add_executable(webmidiprobe tests/webmidiprobe.cpp)
+    target_link_libraries(webmidiprobe PRIVATE ${LIBRTMIDI})
+    target_link_options(webmidiprobe PRIVATE
+      "-sEXPORTED_FUNCTIONS=['_main','_rtmidi_web_access_state','_rtmidi_web_init','_rtmidi_web_probe']"
+      "-sEXIT_RUNTIME=0"
+      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiprobe.html")
+    set_target_properties(webmidiprobe PROPERTIES
+      SUFFIX ".html"
+      RUNTIME_OUTPUT_DIRECTORY tests)
   endif()
 endif()
 
