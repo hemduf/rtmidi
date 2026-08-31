@@ -33,6 +33,20 @@ RtMidi is also offered as a module, which is enabled with `RTMIDI_BUILD_MODULES`
 
 In some cases, for example to use RtMidi with GS Synth, it may be necessary for your program to call `CoInitializeEx` and `CoUninitialize` on entry to and exit from the thread that uses RtMidi.
 
+## WebAssembly / Web MIDI
+
+The CMake build enables the Web MIDI backend by default when RtMidi is configured with the Emscripten toolchain. WebAssembly builds default to a static library.
+
+```sh
+emcmake cmake -S . -B build-wasm \
+  -DRTMIDI_BUILD_TESTING=OFF
+cmake --build build-wasm
+```
+
+The backend can also be selected explicitly with `-DRTMIDI_API_WEBMIDI=ON`. `RtMidiIn` and `RtMidiOut` then expose `RtMidi::WEB_MIDI_API` and use the browser's `navigator.requestMIDIAccess()` API.
+
+Web MIDI access is permission-based and asynchronous. Applications should wait until the browser permission request has settled before relying on port enumeration. Browser support also requires a context where Web MIDI is available, normally a secure context.
+
 ## Further reading
 
 For complete documentation on RtMidi, see the `doc` directory of the distribution or surf to https://caml.music.mcgill.ca/~gary/rtmidi/.
