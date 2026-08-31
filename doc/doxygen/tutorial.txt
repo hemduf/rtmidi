@@ -369,9 +369,15 @@ The example compiler statements above could be used to compile the <TT>midiprobe
 
 RtMidi can be compiled to WebAssembly with Emscripten and use the browser Web MIDI API.  When CMake is configured through <TT>emcmake</TT>, the Web MIDI backend is enabled by default and the library defaults to a static build.  It can also be selected explicitly with <TT>-DRTMIDI_API_WEBMIDI=ON</TT>.
 
-The <TT>tests/webmidiprobe.cpp</TT> application is the WebAssembly counterpart of <TT>tests/midiprobe.cpp</TT>.  It is linked with the custom Emscripten HTML shell <TT>tests/webmidiprobe.html</TT>.  The browser interface requests Web MIDI permission, waits for the asynchronous permission request to complete, then uses RtMidiIn and RtMidiOut to enumerate the actual input and output ports exposed by the browser.
+Three interactive browser examples are provided:
 
-Configure and build the complete browser application with:
+- <TT>webmidiprobe</TT> is the WebAssembly counterpart of <TT>midiprobe</TT>. It enumerates the compiled RtMidi APIs and the MIDI inputs and outputs exposed by the browser.
+- <TT>webmidiin</TT> is the WebAssembly counterpart of <TT>cmidiin</TT>. It opens a selected MIDI input and displays incoming messages through a RtMidi callback.
+- <TT>webmidiout</TT> is the WebAssembly counterpart of <TT>midiout</TT>. It opens a selected MIDI output and provides a one-octave keyboard, Control Change controls, and an All Notes Off command.
+
+Each C++ example has a custom Emscripten HTML shell in the <TT>tests</TT> directory. The HTML interface explicitly requests Web MIDI permission from a user action and waits for the asynchronous permission request before enumerating ports.
+
+Configure and build all browser applications with:
 
 \code
 emcmake cmake -S . -B build-wasm \
@@ -381,26 +387,41 @@ emcmake cmake -S . -B build-wasm \
   -DRTMIDI_API_WEBMIDI=ON \
   -DRTMIDI_BUILD_TESTING=ON
 
-cmake --build build-wasm --target webmidiprobe
+cmake --build build-wasm \
+  --target webmidiprobe webmidiin webmidiout
 \endcode
 
-The Emscripten link step generates three files in <TT>build-wasm/tests/</TT>:
+Each target generates an HTML, JavaScript, and WebAssembly file in <TT>build-wasm/tests/</TT>:
 
 \code
 webmidiprobe.html
 webmidiprobe.js
 webmidiprobe.wasm
+webmidiin.html
+webmidiin.js
+webmidiin.wasm
+webmidiout.html
+webmidiout.js
+webmidiout.wasm
 \endcode
 
-The generated page should be served through HTTP rather than opened directly with a <TT>file://</TT> URL.  For local development, for example:
+The generated pages should be served through HTTP rather than opened directly with a <TT>file://</TT> URL. For local development:
 
 \code
 python3 -m http.server 8000 --directory build-wasm/tests
 \endcode
 
-Then open <TT>http://localhost:8000/webmidiprobe.html</TT> in a browser with Web MIDI support, click <B>Request Web MIDI access</B>, accept the browser permission request, and click <B>Probe MIDI ports</B> whenever the device list should be refreshed.
+Then open one of the following pages in a browser with Web MIDI support:
 
-Web MIDI permission is asynchronous.  Application code must not assume that ports are available immediately after constructing a RtMidiIn or RtMidiOut Web MIDI instance.  Wait until the browser permission request has completed before relying on RtMidiIn::getPortCount(), RtMidiIn::getPortName(), RtMidiOut::getPortCount(), or RtMidiOut::getPortName().  Browser use also normally requires a secure context; <TT>localhost</TT> is appropriate for local testing.
+\code
+http://localhost:8000/webmidiprobe.html
+http://localhost:8000/webmidiin.html
+http://localhost:8000/webmidiout.html
+\endcode
+
+Use <TT>webmidiprobe</TT> to verify device enumeration. Use <TT>webmidiin</TT> to refresh the MIDI input list, select a port, open it, and inspect incoming MIDI bytes in real time. Use <TT>webmidiout</TT> to refresh the output list, select a port, play notes, send arbitrary Control Change values, and send CC 123 (All Notes Off).
+
+Web MIDI permission is asynchronous. Application code must not assume that ports are available immediately after constructing a RtMidiIn or RtMidiOut Web MIDI instance. Wait until the browser permission request has completed before relying on RtMidiIn::getPortCount(), RtMidiIn::getPortName(), RtMidiOut::getPortCount(), or RtMidiOut::getPortName(). Browser use also normally requires a secure context; <TT>localhost</TT> is appropriate for local testing.
 
 A headless regression test is also provided as <TT>webmidi-smoke</TT>. It runs under Node with a mocked Web MIDI implementation and validates backend selection, port enumeration, MIDI input callback wiring, MIDI output, and port closing:
 
