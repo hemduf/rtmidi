@@ -72,3 +72,24 @@ jobs:
         && mkdir bld-automake && cd bld-automake
         && (../configure --host=${{matrix.host}} --with-${{matrix.api}} CPPFLAGS=${{matrix.cppflags}} || (cat config.log; false))
         && make V=1
+
+  WebMIDI:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup Emscripten
+      uses: emscripten-core/setup-emsdk@v15
+    - name: Configure
+      run: >
+        emcmake cmake -S . -B bld-webmidi
+        -DBUILD_SHARED_LIBS=OFF
+        -DRTMIDI_API_JACK=OFF
+        -DRTMIDI_API_ALSA=OFF
+        -DRTMIDI_API_WEBMIDI=ON
+        -DRTMIDI_BUILD_TESTING=ON
+    - name: Build Web MIDI smoke test
+      run: cmake --build bld-webmidi --target webmidi-smoke --parallel
+    - name: Test Web MIDI bridge
+      run: ctest --test-dir bld-webmidi -R webmidi-smoke --output-on-failure
