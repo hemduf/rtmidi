@@ -46,6 +46,7 @@ endif()
 
 # Build Options
 set(RTMIDI_TARGETNAME_UNINSTALL "rt_uninstall" CACHE STRING "Name of 'uninstall' build target")
+option(RTMIDI_BUILD_WEBMIDI_EXAMPLES "Build Web MIDI browser examples." OFF)
 
 # API Options
 option(RTMIDI_API_JACK "Compile with JACK support." ${HAVE_JACK})
@@ -182,8 +183,20 @@ if(RTMIDI_API_WEBMIDI)
   if(NOT EMSCRIPTEN)
     message(FATAL_ERROR "RTMIDI_API_WEBMIDI requires an Emscripten toolchain")
   endif()
+
   list(APPEND API_DEFS "-D__WEB_MIDI_API__")
   list(APPEND API_LIST "web")
+  list(APPEND rtmidi_SOURCES RtMidiWeb.cpp)
+
+  # RtMidi.cpp contains the historical Web MIDI entry points. Keep the
+  # implementation source intact but rename those legacy symbols in that
+  # translation unit so RtMidiWeb.cpp can provide the corrected public entry
+  # points used by JavaScript and the C/C++ API.
+  set_property(SOURCE RtMidi.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "rtmidi_onMidiMessageProc=rtmidi_onMidiMessageProc_legacy"
+    "getCompiledApi=getCompiledApiLegacy")
+  set_property(SOURCE rtmidi_c.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "rtmidi_get_compiled_api=rtmidi_get_compiled_api_legacy")
 endif()
 
 # pthread
@@ -216,6 +229,7 @@ else()
   add_library(rtmidi ${rtmidi_SOURCES})
 endif()
 list(APPEND LIB_TARGETS rtmidi)
+list(GET LIB_TARGETS 0 LIBRTMIDI)
 
 # Add headers destination for install rule.
 set_property(TARGET rtmidi PROPERTY PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/RtMidi.h" "${CMAKE_CURRENT_SOURCE_DIR}/rtmidi_c.h")
@@ -235,14 +249,14 @@ target_include_directories(rtmidi PRIVATE ${INCDIRS}
 # Set compile-time definitions
 target_compile_definitions(rtmidi PRIVATE ${API_DEFS})
 target_compile_definitions(rtmidi PRIVATE RTMIDI_EXPORT)
-target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS} 
+target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS}
                              PRIVATE ${LINKLIBS})
 
 # The Web MIDI input bridge invokes Module.ccall() from EM_ASM. Modern
 # Emscripten does not export runtime helpers by default, so make this usage
 # requirement propagate to applications linking the static RtMidi target.
 if(RTMIDI_API_WEBMIDI)
-  target_link_options(rtmidi INTERFACE "-sEXPORTED_RUNTIME_METHODS=['ccall']")
+  target_link_options(rtmidi INTERFACE "-sEXPORTED_RUNTIME_METHODS=ccall")
 endif()
 
 if(RTMIDI_BUILD_MODULES)
@@ -259,69 +273,72 @@ option(RTMIDI_BUILD_TESTING "Build test programs" ON)
 if (NOT DEFINED RTMIDI_BUILD_TESTING OR RTMIDI_BUILD_TESTING STREQUAL "")
   set(RTMIDI_BUILD_TESTING ${BUILD_TESTING})
 endif()
-if (RTMIDI_BUILD_TESTING)
+if(RTMIDI_BUILD_TESTING)
   include(CTest)
-  add_executable(cmidiin    tests/cmidiin.cpp)
-  add_executable(midiclock  tests/midiclock.cpp)
-  add_executable(midiout    tests/midiout.cpp)
-  add_executable(midiprobe  tests/midiprobe.cpp)
-  add_executable(qmidiin    tests/qmidiin.cpp)
-  add_executable(sysextest  tests/sysextest.cpp)
-  add_executable(apinames   tests/apinames.cpp)
-  add_executable(testcapi   tests/testcapi.c)
-  list(GET LIB_TARGETS 0 LIBRTMIDI)
-  set_target_properties(cmidiin midiclock midiout midiprobe qmidiin sysextest apinames testcapi
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY tests
-               INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}
-               LINK_LIBRARIES ${LIBRTMIDI})
-  add_test(NAME apinames COMMAND apinames)
 
-  if(RTMIDI_API_WEBMIDI)
+  if(EMSCRIPTEN)
+    if(NOT RTMIDI_API_WEBMIDI)
+      message(FATAL_ERROR "Emscripten tests require RTMIDI_API_WEBMIDI=ON")
+    endif()
+
     find_program(NODE_EXECUTABLE node REQUIRED)
-
-    # Headless regression test using a mocked Web MIDI implementation.
     add_executable(webmidi-smoke tests/webmidi-smoke.cpp)
     target_link_libraries(webmidi-smoke PRIVATE ${LIBRTMIDI})
     target_link_options(webmidi-smoke PRIVATE
+      "-sENVIRONMENT=node"
       "--pre-js" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidi-pre.js")
     set_target_properties(webmidi-smoke PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY tests)
     add_test(NAME webmidi-smoke
       COMMAND ${NODE_EXECUTABLE} $<TARGET_FILE:webmidi-smoke>)
-
-    # Interactive browser probe, equivalent to midiprobe for Web MIDI.
-    add_executable(webmidiprobe tests/webmidiprobe.cpp)
-    target_link_libraries(webmidiprobe PRIVATE ${LIBRTMIDI})
-    target_link_options(webmidiprobe PRIVATE
-      "-sEXPORTED_FUNCTIONS=['_main','_rtmidi_web_access_state','_rtmidi_web_init','_rtmidi_web_probe']"
-      "-sEXIT_RUNTIME=0"
-      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiprobe.html")
-    set_target_properties(webmidiprobe PROPERTIES
-      SUFFIX ".html"
-      RUNTIME_OUTPUT_DIRECTORY tests)
-
-    # Interactive browser MIDI input monitor, equivalent to cmidiin.
-    add_executable(webmidiin tests/webmidiin.cpp)
-    target_link_libraries(webmidiin PRIVATE ${LIBRTMIDI})
-    target_link_options(webmidiin PRIVATE
-      "-sEXPORTED_FUNCTIONS=['_main','_webmidiin_access_state','_webmidiin_init','_webmidiin_port_count','_webmidiin_port_name','_webmidiin_open','_webmidiin_close']"
-      "-sEXIT_RUNTIME=0"
-      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiin.html")
-    set_target_properties(webmidiin PROPERTIES
-      SUFFIX ".html"
-      RUNTIME_OUTPUT_DIRECTORY tests)
-
-    # Interactive browser MIDI output tester, equivalent to midiout.
-    add_executable(webmidiout tests/webmidiout.cpp)
-    target_link_libraries(webmidiout PRIVATE ${LIBRTMIDI})
-    target_link_options(webmidiout PRIVATE
-      "-sEXPORTED_FUNCTIONS=['_main','_webmidiout_access_state','_webmidiout_init','_webmidiout_port_count','_webmidiout_port_name','_webmidiout_open','_webmidiout_close','_webmidiout_note_on','_webmidiout_note_off','_webmidiout_cc','_webmidiout_all_notes_off']"
-      "-sEXIT_RUNTIME=0"
-      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidiout.html")
-    set_target_properties(webmidiout PROPERTIES
-      SUFFIX ".html"
-      RUNTIME_OUTPUT_DIRECTORY tests)
+  else()
+    add_executable(cmidiin    tests/cmidiin.cpp)
+    add_executable(midiclock  tests/midiclock.cpp)
+    add_executable(midiout    tests/midiout.cpp)
+    add_executable(midiprobe  tests/midiprobe.cpp)
+    add_executable(qmidiin    tests/qmidiin.cpp)
+    add_executable(sysextest  tests/sysextest.cpp)
+    add_executable(apinames   tests/apinames.cpp)
+    add_executable(testcapi   tests/testcapi.c)
+    set_target_properties(cmidiin midiclock midiout midiprobe qmidiin sysextest apinames testcapi
+      PROPERTIES RUNTIME_OUTPUT_DIRECTORY tests
+                 INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}
+                 LINK_LIBRARIES ${LIBRTMIDI})
+    add_test(NAME apinames COMMAND apinames)
   endif()
+endif()
+
+# Browser examples are intentionally independent of RTMIDI_BUILD_TESTING so
+# applications can build them without requiring Node or the headless test.
+if(RTMIDI_BUILD_WEBMIDI_EXAMPLES)
+  if(NOT EMSCRIPTEN OR NOT RTMIDI_API_WEBMIDI)
+    message(FATAL_ERROR "RTMIDI_BUILD_WEBMIDI_EXAMPLES requires Emscripten and RTMIDI_API_WEBMIDI=ON")
+  endif()
+
+  function(rtmidi_add_webmidi_example target source shell exports)
+    add_executable(${target} ${source})
+    target_link_libraries(${target} PRIVATE ${LIBRTMIDI})
+    target_link_options(${target} PRIVATE
+      "-sENVIRONMENT=web"
+      "-sEXPORTED_FUNCTIONS=${exports}"
+      "-sEXIT_RUNTIME=0"
+      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/${shell}")
+    set_target_properties(${target} PROPERTIES
+      SUFFIX ".html"
+      RUNTIME_OUTPUT_DIRECTORY tests)
+  endfunction()
+
+  rtmidi_add_webmidi_example(
+    webmidiprobe tests/webmidiprobe.cpp tests/webmidiprobe.html
+    "_main,_rtmidi_web_access_state,_rtmidi_web_init,_rtmidi_web_probe")
+
+  rtmidi_add_webmidi_example(
+    webmidiin tests/webmidiin.cpp tests/webmidiin.html
+    "_main,_webmidiin_access_state,_webmidiin_init,_webmidiin_port_count,_webmidiin_port_name,_webmidiin_open,_webmidiin_close")
+
+  rtmidi_add_webmidi_example(
+    webmidiout tests/webmidiout.cpp tests/webmidiout.html
+    "_main,_webmidiout_access_state,_webmidiout_init,_webmidiout_port_count,_webmidiout_port_name,_webmidiout_open,_webmidiout_close,_webmidiout_note_on,_webmidiout_note_off,_webmidiout_cc,_webmidiout_all_notes_off,_webmidiout_panic")
 endif()
 
 # Set standard installation directories.
