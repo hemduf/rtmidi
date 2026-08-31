@@ -20,13 +20,22 @@ if(JACK_LIB OR jack_FOUND)
   set(HAVE_JACK TRUE)
 endif()
 
+# Never select a host JACK installation when cross-compiling to WebAssembly.
+if(EMSCRIPTEN)
+  set(HAVE_JACK FALSE)
+endif()
+
 # Necessary for Windows
 if(WIN32)
   set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
 # Standard CMake options
-option(BUILD_SHARED_LIBS "Build as shared library" ON)
+set(_rtmidi_default_shared ON)
+if(EMSCRIPTEN)
+  set(_rtmidi_default_shared OFF)
+endif()
+option(BUILD_SHARED_LIBS "Build as shared library" ${_rtmidi_default_shared})
 
 if (NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug;Release;RelWithDebInfo;MinSizeRel")
@@ -44,6 +53,7 @@ option(RTMIDI_API_WINMM "Compile with WINMM support." ${WIN32})
 option(RTMIDI_API_CORE "Compile with CoreMIDI support." ${APPLE})
 option(RTMIDI_API_ALSA "Compile with ALSA support." ${ALSA})
 option(RTMIDI_API_AMIDI "Compile with Android support." ${ANDROID})
+option(RTMIDI_API_WEBMIDI "Compile with Web MIDI support." ${EMSCRIPTEN})
 
 # Module options
 option(RTMIDI_BUILD_MODULES "Build C++ modules for RtMidi" OFF)
@@ -167,6 +177,15 @@ if(RTMIDI_API_AMIDI)
   list(APPEND LINKLIBS log ${JNI_LIBRARIES} amidi)
 endif()
 
+# Web MIDI
+if(RTMIDI_API_WEBMIDI)
+  if(NOT EMSCRIPTEN)
+    message(FATAL_ERROR "RTMIDI_API_WEBMIDI requires an Emscripten toolchain")
+  endif()
+  list(APPEND API_DEFS "-D__WEB_MIDI_API__")
+  list(APPEND API_LIST "web")
+endif()
+
 # pthread
 if (NEED_PTHREAD)
   find_package(Threads REQUIRED
@@ -219,6 +238,13 @@ target_compile_definitions(rtmidi PRIVATE RTMIDI_EXPORT)
 target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS} 
                              PRIVATE ${LINKLIBS})
 
+# The Web MIDI input bridge invokes Module.ccall() from EM_ASM. Modern
+# Emscripten does not export runtime helpers by default, so make this usage
+# requirement propagate to applications linking the static RtMidi target.
+if(RTMIDI_API_WEBMIDI)
+  target_link_options(rtmidi INTERFACE "-sEXPORTED_RUNTIME_METHODS=['ccall']")
+endif()
+
 if(RTMIDI_BUILD_MODULES)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
     message(STATUS "Building rtmidi C++ module")
@@ -249,6 +275,18 @@ if (RTMIDI_BUILD_TESTING)
                INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}
                LINK_LIBRARIES ${LIBRTMIDI})
   add_test(NAME apinames COMMAND apinames)
+
+  if(RTMIDI_API_WEBMIDI)
+    find_program(NODE_EXECUTABLE node REQUIRED)
+    add_executable(webmidi-smoke tests/webmidi-smoke.cpp)
+    target_link_libraries(webmidi-smoke PRIVATE ${LIBRTMIDI})
+    target_link_options(webmidi-smoke PRIVATE
+      "--pre-js=${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidi-pre.js")
+    set_target_properties(webmidi-smoke PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY tests)
+    add_test(NAME webmidi-smoke
+      COMMAND ${NODE_EXECUTABLE} $<TARGET_FILE:webmidi-smoke>)
+  endif()
 endif()
 
 # Set standard installation directories.
