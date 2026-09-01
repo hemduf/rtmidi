@@ -10,7 +10,6 @@
 
 #include <emscripten.h>
 
-#include <algorithm>
 #include <iostream>
 #include <memory>
 #include <string>
@@ -97,19 +96,12 @@ extern "C" EMSCRIPTEN_KEEPALIVE int rtmidi_web_probe()
 
   try {
     std::vector<RtMidi::Api> apis;
-    std::vector<RtMidi::Api> displayedApis;
     RtMidi::getCompiledApi(apis);
 
     std::cout << "\nCompiled APIs:" << std::endl;
     for (std::vector<RtMidi::Api>::const_iterator it = apis.begin();
-         it != apis.end(); ++it) {
-      // RtMidi 6.0's historical table contains Web MIDI twice. Keep the probe
-      // useful on that source snapshot while the public ABI remains unchanged.
-      if (std::find(displayedApis.begin(), displayedApis.end(), *it) == displayedApis.end()) {
-        displayedApis.push_back(*it);
-        printApi(*it);
-      }
-    }
+         it != apis.end(); ++it)
+      printApi(*it);
 
     std::cout << "\nCurrent input API: "
               << RtMidi::getApiDisplayName(midiIn->getCurrentApi())
