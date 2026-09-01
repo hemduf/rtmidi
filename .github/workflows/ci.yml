@@ -6,13 +6,50 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: rtmidi-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  FixWebMIDIApiTable:
+    name: Apply direct Web MIDI API table fix
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feat/wasm-web-midi'
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Remove duplicate Web MIDI API entry
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        from pathlib import Path
+
+        path = Path('RtMidi.cpp')
+        text = path.read_text()
+        duplicate = '''#if defined(__WEB_MIDI_API__)\n  RtMidi::WEB_MIDI_API,\n#endif\n#if defined(__WEB_MIDI_API__)\n  RtMidi::WEB_MIDI_API,\n#endif'''
+        single = '''#if defined(__WEB_MIDI_API__)\n  RtMidi::WEB_MIDI_API,\n#endif'''
+
+        if duplicate not in text:
+            raise SystemExit('duplicate Web MIDI API entry not found')
+
+        path.write_text(text.replace(duplicate, single, 1))
+        PY
+        git diff --check
+        git diff -- RtMidi.cpp
+    - name: Commit direct source fix
+      shell: bash
+      run: |
+        set -euo pipefail
+        git config user.name github-actions[bot]
+        git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+        git add RtMidi.cpp
+        git commit -m "fix(webmidi): remove duplicate compiled API entry"
+        git push origin HEAD:feat/wasm-web-midi
+
   Linux:
     runs-on: ubuntu-latest
     strategy:
