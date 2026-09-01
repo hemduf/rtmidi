@@ -63,7 +63,7 @@ int main()
 
   std::vector<RtMidi::Api> apis;
   RtMidi::getCompiledApi(apis);
-  if (std::find(apis.begin(), apis.end(), RtMidi::WEB_MIDI_API) == apis.end())
+  if (std::count(apis.begin(), apis.end(), RtMidi::WEB_MIDI_API) != 1)
     return 1;
 
   RtMidiIn input(RtMidi::WEB_MIDI_API);
