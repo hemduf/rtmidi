@@ -41,15 +41,23 @@ void inject(unsigned char status,
             int size,
             double timestamp)
 {
+  // Commas inside the JavaScript body would be parsed by the C preprocessor
+  // as additional EM_ASM macro arguments. Build the array and event object
+  // incrementally so the first macro argument contains no commas.
   EM_ASM({
     var mockInput = globalThis.__rtmidiTestAccess.inputs.get("input-0");
     if (!mockInput.onmidimessage)
       throw new Error("RtMidi did not install the Web MIDI input callback");
-    var bytes = [$0, $1, $2].slice(0, $3);
-    mockInput.onmidimessage({
-      data: new Uint8Array(bytes),
-      timeStamp: $4
-    });
+    var bytes = [];
+    bytes.push($0);
+    if ($3 > 1)
+      bytes.push($1);
+    if ($3 > 2)
+      bytes.push($2);
+    var event = {};
+    event.data = new Uint8Array(bytes);
+    event.timeStamp = $4;
+    mockInput.onmidimessage(event);
   }, status, data1, data2, size, timestamp);
 }
 
