@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RtMidi Web MIDI Probe</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+
+    body {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 20px;
+      line-height: 1.5;
+    }
+
+    h1 {
+      margin-bottom: 0.25rem;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 24px 0;
+    }
+
+    button {
+      font: inherit;
+      padding: 9px 14px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      cursor: default;
+      opacity: 0.55;
+    }
+
+    #status {
+      display: inline-block;
+      padding: 4px 8px;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+    }
+
+    #output {
+      min-height: 280px;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      border: 1px solid currentColor;
+      border-radius: 4px;
+      padding: 16px;
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <h1>RtMidi Web MIDI Probe</h1>
+  <p>
+    Browser test application for the RtMidi Web MIDI backend. It uses the
+    WebAssembly build of RtMidi to enumerate MIDI input and output ports.
+  </p>
+
+  <p>Status: <span id="status">Loading WebAssembly...</span></p>
+
+  <div class="controls">
+    <button id="request" disabled>Request Web MIDI access</button>
+    <button id="probe" disabled>Probe MIDI ports</button>
+    <button id="clear">Clear log</button>
+  </div>
+
+  <pre id="output" aria-live="polite"></pre>
+
+  <script>
+    const output = document.getElementById('output');
+    const statusNode = document.getElementById('status');
+    const requestButton = document.getElementById('request');
+    const probeButton = document.getElementById('probe');
+    const clearButton = document.getElementById('clear');
+
+    function appendLog(text) {
+      output.textContent += text + '\n';
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function setStatus(text) {
+      statusNode.textContent = text;
+    }
+
+    function call(name, returnType = 'number') {
+      return Module.ccall(name, returnType, [], []);
+    }
+
+    function accessState() {
+      return call('rtmidi_web_access_state');
+    }
+
+    function describeAccessState(state) {
+      switch (state) {
+        case 0: return 'Web MIDI available; permission not requested';
+        case 1: return 'Waiting for Web MIDI permission...';
+        case 2: return 'Web MIDI ready';
+        case -1: return 'Web MIDI permission denied or unavailable';
+        case -2: return 'Web MIDI is not supported by this browser';
+        default: return 'Unknown Web MIDI state (' + state + ')';
+      }
+    }
+
+    async function waitForAccess() {
+      for (let attempt = 0; attempt < 300; ++attempt) {
+        const state = accessState();
+        setStatus(describeAccessState(state));
+
+        if (state === 2) {
+          probeButton.disabled = false;
+          call('rtmidi_web_probe');
+          return;
+        }
+
+        if (state < 0) {
+          requestButton.disabled = false;
+          return;
+        }
+
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+
+      setStatus('Timed out waiting for Web MIDI permission');
+      appendLog('Timed out waiting for Web MIDI permission. Check the browser permission prompt.');
+      requestButton.disabled = false;
+    }
+
+    requestButton.addEventListener('click', async () => {
+      requestButton.disabled = true;
+      probeButton.disabled = true;
+
+      const initialState = accessState();
+      if (initialState === -2) {
+        setStatus(describeAccessState(initialState));
+        appendLog('navigator.requestMIDIAccess() is not available in this browser.');
+        return;
+      }
+
+      const result = call('rtmidi_web_init');
+      if (result !== 0) {
+        setStatus('RtMidi Web MIDI initialization failed');
+        requestButton.disabled = false;
+        return;
+      }
+
+      await waitForAccess();
+    });
+
+    probeButton.addEventListener('click', () => {
+      const state = accessState();
+      setStatus(describeAccessState(state));
+      if (state === 2)
+        call('rtmidi_web_probe');
+    });
+
+    clearButton.addEventListener('click', () => {
+      output.textContent = '';
+    });
+
+    var Module = {
+      print: (...args) => appendLog(args.join(' ')),
+      printErr: (...args) => appendLog('[error] ' + args.join(' ')),
+      onRuntimeInitialized: () => {
+        const state = accessState();
+        setStatus(describeAccessState(state));
+        requestButton.disabled = false;
+        probeButton.disabled = state !== 2;
+      }
+    };
+  </script>
+
+  {{{ SCRIPT }}}
+</body>
+</html>

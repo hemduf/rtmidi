@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RtMidi Web MIDI Input Monitor</title>
+  <style>
+    :root { color-scheme: light dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    body { max-width: 960px; margin: 0 auto; padding: 32px 20px; line-height: 1.5; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; align-items: center; }
+    button, select { font: inherit; padding: 8px 10px; }
+    button:disabled, select:disabled { opacity: .55; }
+    #status { display: inline-block; padding: 4px 8px; border: 1px solid currentColor; border-radius: 4px; }
+    #output { min-height: 320px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid currentColor; border-radius: 4px; padding: 16px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>RtMidi Web MIDI Input Monitor</h1>
+  <p>Open a browser Web MIDI input through RtMidi and inspect incoming messages and delta times in real time.</p>
+  <p>Status: <span id="status">Loading WebAssembly...</span></p>
+
+  <div class="controls">
+    <button id="request" disabled>Request Web MIDI access</button>
+    <button id="refresh" disabled>Refresh inputs</button>
+    <select id="ports" disabled></select>
+    <button id="open" disabled>Open input</button>
+    <button id="close" disabled>Close input</button>
+    <button id="clear">Clear log</button>
+  </div>
+
+  <pre id="output" aria-live="polite"></pre>
+
+  <script>
+    const output = document.getElementById('output');
+    const statusNode = document.getElementById('status');
+    const requestButton = document.getElementById('request');
+    const refreshButton = document.getElementById('refresh');
+    const ports = document.getElementById('ports');
+    const openButton = document.getElementById('open');
+    const closeButton = document.getElementById('close');
+    const clearButton = document.getElementById('clear');
+
+    let inputOpen = false;
+    let openPortIndex = -1;
+
+    function appendLog(text) {
+      output.textContent += text + '\n';
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function call(name, returnType = 'number', argTypes = [], args = []) {
+      return Module.ccall(name, returnType, argTypes, args);
+    }
+
+    function state() { return call('webmidiin_access_state'); }
+
+    function stateText(value) {
+      if (value === 0) return 'Web MIDI available; permission not requested';
+      if (value === 1) return 'Waiting for Web MIDI permission...';
+      if (value === 2) return inputOpen ? 'Listening on input #' + openPortIndex : 'Web MIDI ready';
+      if (value === -1) return 'Web MIDI permission denied or unavailable';
+      if (value === -2) return 'Web MIDI is not supported by this browser';
+      return 'Unknown state (' + value + ')';
+    }
+
+    function updateControls(value = state()) {
+      const ready = value === 2;
+      const hasPorts = ports.options.length > 0;
+
+      statusNode.textContent = stateText(value);
+      refreshButton.disabled = !ready || inputOpen;
+      ports.disabled = !ready || inputOpen || !hasPorts;
+      openButton.disabled = !ready || inputOpen || !hasPorts;
+      closeButton.disabled = !inputOpen;
+      return value;
+    }
+
+    function refreshPorts() {
+      if (inputOpen)
+        return;
+
+      ports.innerHTML = '';
+      const count = call('webmidiin_port_count');
+      for (let i = 0; i < count; ++i) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = i + ': ' + call('webmidiin_port_name', 'string', ['number'], [i]);
+        ports.appendChild(option);
+      }
+      appendLog('Found ' + count + ' MIDI input port(s).');
+      updateControls(2);
+    }
+
+    async function waitForAccess() {
+      for (let i = 0; i < 300; ++i) {
+        const value = updateControls();
+        if (value === 2) {
+          refreshPorts();
+          requestButton.disabled = true;
+          return;
+        }
+        if (value < 0) {
+          requestButton.disabled = false;
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      statusNode.textContent = 'Timed out waiting for Web MIDI permission';
+      requestButton.disabled = false;
+    }
+
+    requestButton.addEventListener('click', async () => {
+      requestButton.disabled = true;
+      if (call('webmidiin_init') !== 0) {
+        statusNode.textContent = 'RtMidi initialization failed';
+        requestButton.disabled = false;
+        return;
+      }
+      await waitForAccess();
+    });
+
+    refreshButton.addEventListener('click', refreshPorts);
+
+    openButton.addEventListener('click', () => {
+      const index = Number(ports.value);
+      const result = call('webmidiin_open', 'number', ['number'], [index]);
+      if (result === 0) {
+        inputOpen = true;
+        openPortIndex = index;
+        updateControls(2);
+      } else {
+        appendLog('[error] Could not open MIDI input #' + index + ' (code ' + result + ')');
+      }
+    });
+
+    closeButton.addEventListener('click', () => {
+      call('webmidiin_close', null);
+      inputOpen = false;
+      openPortIndex = -1;
+      updateControls(2);
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (inputOpen)
+        call('webmidiin_close', null);
+    });
+
+    clearButton.addEventListener('click', () => { output.textContent = ''; });
+
+    var Module = {
+      print: (...args) => appendLog(args.join(' ')),
+      printErr: (...args) => appendLog('[error] ' + args.join(' ')),
+      onRuntimeInitialized: () => {
+        const value = updateControls();
+        requestButton.disabled = value === -2;
+      }
+    };
+  </script>
+
+  {{{ SCRIPT }}}
+</body>
+</html>

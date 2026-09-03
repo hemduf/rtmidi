@@ -33,6 +33,99 @@ RtMidi is also offered as a module, which is enabled with `RTMIDI_BUILD_MODULES`
 
 In some cases, for example to use RtMidi with GS Synth, it may be necessary for your program to call `CoInitializeEx` and `CoUninitialize` on entry to and exit from the thread that uses RtMidi.
 
+## WebAssembly / Web MIDI
+
+The CMake build enables the Web MIDI backend by default when RtMidi is configured with the Emscripten toolchain. WebAssembly builds default to a static library.
+
+To build the library only:
+
+```sh
+emcmake cmake -S . -B build-wasm \
+  -DRTMIDI_BUILD_TESTING=OFF \
+  -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=OFF
+cmake --build build-wasm
+```
+
+The backend can also be selected explicitly with `-DRTMIDI_API_WEBMIDI=ON`. `RtMidiIn` and `RtMidiOut` then expose `RtMidi::WEB_MIDI_API` and use the browser's `navigator.requestMIDIAccess()` API.
+
+Web MIDI input follows the normal RtMidi contract: callback messages contain one event at a time, timestamps are delta times expressed in seconds, `ignoreTypes()` is honored, and applications that do not install a callback can use `getMessage()` through the standard RtMidi queue.
+
+### Browser examples
+
+Three browser applications are provided in `tests/`:
+
+- `webmidiprobe`: WebAssembly counterpart of `midiprobe`; enumerates compiled APIs and all available MIDI inputs and outputs.
+- `webmidiin`: interactive MIDI input monitor; selects a real Web MIDI input and displays incoming MIDI messages and delta timestamps through an RtMidi callback.
+- `webmidiout`: interactive MIDI output tester; selects a real Web MIDI output and sends notes from a one-octave keyboard, Control Change messages, and a panic command covering all 16 channels.
+
+The browser examples are independent from `RTMIDI_BUILD_TESTING`; building them does not require Node. Configure and build all three applications with:
+
+```sh
+emcmake cmake -S . -B build-wasm-examples \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DRTMIDI_API_JACK=OFF \
+  -DRTMIDI_API_ALSA=OFF \
+  -DRTMIDI_API_WEBMIDI=ON \
+  -DRTMIDI_BUILD_TESTING=OFF \
+  -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=ON
+
+cmake --build build-wasm-examples \
+  --target webmidiprobe webmidiin webmidiout
+```
+
+Each target produces a complete Emscripten browser bundle in `build-wasm-examples/tests/`:
+
+```text
+webmidiprobe.html
+webmidiprobe.js
+webmidiprobe.wasm
+
+webmidiin.html
+webmidiin.js
+webmidiin.wasm
+
+webmidiout.html
+webmidiout.js
+webmidiout.wasm
+```
+
+Serve the directory over HTTP:
+
+```sh
+python3 -m http.server 8000 --directory build-wasm-examples/tests
+```
+
+Then open one of:
+
+```text
+http://localhost:8000/webmidiprobe.html
+http://localhost:8000/webmidiin.html
+http://localhost:8000/webmidiout.html
+```
+
+Each application requests Web MIDI access from an explicit browser button and waits for the asynchronous permission request before enumerating ports. `webmidiin` locks the selected port while it is listening. `webmidiout` tracks the channel used for every active pointer so changing the channel while holding a note cannot leave it stuck; closing the output, changing ports, losing browser focus, or pressing **Panic** sends All Notes Off (CC 123) and All Sound Off (CC 120) on all 16 channels.
+
+Do not open the generated HTML directly with a `file://` URL: the `.wasm` module is loaded as a separate resource and should be served by an HTTP server. `localhost` is suitable for local development. Web MIDI browser support normally also requires a secure context.
+
+### Headless Web MIDI regression test
+
+The `webmidi-smoke` target uses Node with a mocked Web MIDI implementation. It covers C and C++ API enumeration, port enumeration, multiple input events, delta timestamps, `ignoreTypes()`, callback delivery, queued `getMessage()` delivery, multiple output messages, and close semantics without requiring physical MIDI hardware.
+
+```sh
+emcmake cmake -S . -B build-wasm-tests \
+  -DCMAKE_BUILD_TYPE=Release \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DRTMIDI_API_JACK=OFF \
+  -DRTMIDI_API_ALSA=OFF \
+  -DRTMIDI_API_WEBMIDI=ON \
+  -DRTMIDI_BUILD_TESTING=ON \
+  -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=OFF
+
+cmake --build build-wasm-tests --target webmidi-smoke
+ctest --test-dir build-wasm-tests -R '^webmidi-smoke$' --output-on-failure
+```
+
 ## Further reading
 
 For complete documentation on RtMidi, see the `doc` directory of the distribution or surf to https://caml.music.mcgill.ca/~gary/rtmidi/.

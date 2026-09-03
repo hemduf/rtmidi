@@ -1,0 +1,286 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RtMidi Web MIDI Output Tester</title>
+  <style>
+    :root { color-scheme: light dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    body { max-width: 960px; margin: 0 auto; padding: 32px 20px; line-height: 1.5; }
+    .controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 18px 0; align-items: center; }
+    button, select, input { font: inherit; padding: 8px 10px; }
+    input[type="number"] { width: 72px; }
+    button:disabled, select:disabled, input:disabled { opacity: .55; }
+    #status { display: inline-block; padding: 4px 8px; border: 1px solid currentColor; border-radius: 4px; }
+    #keyboard { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
+    .key { min-width: 54px; min-height: 70px; touch-action: none; user-select: none; }
+    #output { min-height: 220px; white-space: pre-wrap; overflow-wrap: anywhere; border: 1px solid currentColor; border-radius: 4px; padding: 16px; overflow: auto; }
+  </style>
+</head>
+<body>
+  <h1>RtMidi Web MIDI Output Tester</h1>
+  <p>Open a browser Web MIDI output through RtMidi and send notes, control changes and panic messages.</p>
+  <p>Status: <span id="status">Loading WebAssembly...</span></p>
+
+  <div class="controls">
+    <button id="request" disabled>Request Web MIDI access</button>
+    <button id="refresh" disabled>Refresh outputs</button>
+    <select id="ports" disabled></select>
+    <button id="open" disabled>Open output</button>
+    <button id="close" disabled>Close output</button>
+  </div>
+
+  <div class="controls">
+    <label>Channel <input id="channel" type="number" min="1" max="16" value="1"></label>
+    <label>Velocity <input id="velocity" type="number" min="0" max="127" value="100"></label>
+    <button id="panic" disabled>Panic (all channels)</button>
+  </div>
+
+  <h2>One-octave keyboard</h2>
+  <div id="keyboard"></div>
+
+  <h2>Control Change</h2>
+  <div class="controls">
+    <label>CC <input id="cc" type="number" min="0" max="127" value="1"></label>
+    <label>Value <input id="ccValue" type="number" min="0" max="127" value="64"></label>
+    <button id="sendCc" disabled>Send CC</button>
+    <button id="clear">Clear log</button>
+  </div>
+
+  <pre id="output" aria-live="polite"></pre>
+
+  <script>
+    const output = document.getElementById('output');
+    const statusNode = document.getElementById('status');
+    const requestButton = document.getElementById('request');
+    const refreshButton = document.getElementById('refresh');
+    const ports = document.getElementById('ports');
+    const openButton = document.getElementById('open');
+    const closeButton = document.getElementById('close');
+    const channelInput = document.getElementById('channel');
+    const velocityInput = document.getElementById('velocity');
+    const panicButton = document.getElementById('panic');
+    const ccInput = document.getElementById('cc');
+    const ccValueInput = document.getElementById('ccValue');
+    const sendCcButton = document.getElementById('sendCc');
+    const keyboard = document.getElementById('keyboard');
+    const clearButton = document.getElementById('clear');
+
+    let outputOpen = false;
+    const activePointers = new Map();
+
+    function appendLog(text) {
+      output.textContent += text + '\n';
+      output.scrollTop = output.scrollHeight;
+    }
+
+    function call(name, returnType = 'number', argTypes = [], args = []) {
+      return Module.ccall(name, returnType, argTypes, args);
+    }
+
+    function state() { return call('webmidiout_access_state'); }
+
+    function stateText(value) {
+      if (value === 0) return 'Web MIDI available; permission not requested';
+      if (value === 1) return 'Waiting for Web MIDI permission...';
+      if (value === 2) return outputOpen ? 'MIDI output open' : 'Web MIDI ready';
+      if (value === -1) return 'Web MIDI permission denied or unavailable';
+      if (value === -2) return 'Web MIDI is not supported by this browser';
+      return 'Unknown state (' + value + ')';
+    }
+
+    function updateControls(value = state()) {
+      const ready = value === 2;
+      const hasPorts = ports.options.length > 0;
+
+      statusNode.textContent = stateText(value);
+      refreshButton.disabled = !ready || outputOpen;
+      ports.disabled = !ready || outputOpen || !hasPorts;
+      openButton.disabled = !ready || outputOpen || !hasPorts;
+      closeButton.disabled = !outputOpen;
+      panicButton.disabled = !outputOpen;
+      sendCcButton.disabled = !outputOpen;
+      keyboard.querySelectorAll('button').forEach(button => {
+        button.disabled = !outputOpen;
+      });
+
+      return value;
+    }
+
+    function refreshPorts() {
+      if (outputOpen)
+        return;
+
+      ports.innerHTML = '';
+      const count = call('webmidiout_port_count');
+      for (let i = 0; i < count; ++i) {
+        const option = document.createElement('option');
+        option.value = i;
+        option.textContent = i + ': ' + call('webmidiout_port_name', 'string', ['number'], [i]);
+        ports.appendChild(option);
+      }
+      appendLog('Found ' + count + ' MIDI output port(s).');
+      updateControls(2);
+    }
+
+    async function waitForAccess() {
+      for (let i = 0; i < 300; ++i) {
+        const value = updateControls();
+        if (value === 2) {
+          refreshPorts();
+          requestButton.disabled = true;
+          return;
+        }
+        if (value < 0) {
+          requestButton.disabled = false;
+          return;
+        }
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      statusNode.textContent = 'Timed out waiting for Web MIDI permission';
+      requestButton.disabled = false;
+    }
+
+    requestButton.addEventListener('click', async () => {
+      requestButton.disabled = true;
+      if (call('webmidiout_init') !== 0) {
+        statusNode.textContent = 'RtMidi initialization failed';
+        requestButton.disabled = false;
+        return;
+      }
+      await waitForAccess();
+    });
+
+    refreshButton.addEventListener('click', refreshPorts);
+
+    openButton.addEventListener('click', () => {
+      const index = Number(ports.value);
+      const result = call('webmidiout_open', 'number', ['number'], [index]);
+      if (result === 0) {
+        outputOpen = true;
+        activePointers.clear();
+        updateControls(2);
+      } else {
+        appendLog('[error] Could not open MIDI output #' + index + ' (code ' + result + ')');
+      }
+    });
+
+    closeButton.addEventListener('click', () => {
+      call('webmidiout_close', null);
+      activePointers.clear();
+      outputOpen = false;
+      updateControls(2);
+    });
+
+    function bounded(input, min, max) {
+      let value = Number(input.value);
+      if (!Number.isFinite(value))
+        value = min;
+      value = Math.round(Math.max(min, Math.min(max, value)));
+      input.value = value;
+      return value;
+    }
+
+    function panic(logResult = true) {
+      if (!outputOpen)
+        return 0;
+
+      const result = call('webmidiout_panic');
+      activePointers.clear();
+      if (logResult) {
+        appendLog(result === 0
+          ? 'Panic: All Notes Off + All Sound Off on all 16 channels'
+          : '[error] Panic failed (code ' + result + ')');
+      }
+      return result;
+    }
+
+    const noteNames = ['C4', 'C#4', 'D4', 'D#4', 'E4', 'F4', 'F#4', 'G4', 'G#4', 'A4', 'A#4', 'B4', 'C5'];
+    noteNames.forEach((name, offset) => {
+      const note = 60 + offset;
+      const button = document.createElement('button');
+      button.className = 'key';
+      button.textContent = name + '\n' + note;
+      button.disabled = true;
+
+      function noteOn(event) {
+        event.preventDefault();
+        if (!outputOpen || activePointers.has(event.pointerId))
+          return false;
+
+        const channel = bounded(channelInput, 1, 16);
+        const velocity = bounded(velocityInput, 0, 127);
+        const result = call('webmidiout_note_on', 'number',
+          ['number', 'number', 'number'], [channel, note, velocity]);
+        if (result !== 0) {
+          appendLog('[error] Note On failed (code ' + result + ')');
+          return false;
+        }
+
+        activePointers.set(event.pointerId, { note, channel });
+        appendLog('Note On  ch=' + channel + ' note=' + note + ' velocity=' + velocity);
+        return true;
+      }
+
+      function noteOff(event) {
+        event.preventDefault();
+        const active = activePointers.get(event.pointerId);
+        if (!active)
+          return;
+
+        activePointers.delete(event.pointerId);
+        if (!outputOpen)
+          return;
+
+        const result = call('webmidiout_note_off', 'number',
+          ['number', 'number', 'number'], [active.channel, active.note, 0]);
+        appendLog(result === 0
+          ? 'Note Off ch=' + active.channel + ' note=' + active.note
+          : '[error] Note Off failed (code ' + result + ')');
+      }
+
+      button.addEventListener('pointerdown', event => {
+        if (noteOn(event))
+          button.setPointerCapture(event.pointerId);
+      });
+      button.addEventListener('pointerup', noteOff);
+      button.addEventListener('pointercancel', noteOff);
+      button.addEventListener('lostpointercapture', noteOff);
+      keyboard.appendChild(button);
+    });
+
+    sendCcButton.addEventListener('click', () => {
+      const channel = bounded(channelInput, 1, 16);
+      const controller = bounded(ccInput, 0, 127);
+      const value = bounded(ccValueInput, 0, 127);
+      const result = call('webmidiout_cc', 'number', ['number', 'number', 'number'], [channel, controller, value]);
+      appendLog(result === 0
+        ? 'CC ch=' + channel + ' controller=' + controller + ' value=' + value
+        : '[error] Could not send CC (code ' + result + ')');
+    });
+
+    panicButton.addEventListener('click', () => panic(true));
+
+    // Losing focus is a common way for pointer-up events to be missed. Panic
+    // immediately so a browser focus change cannot leave notes sounding.
+    window.addEventListener('blur', () => panic(false));
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden)
+        panic(false);
+    });
+
+    clearButton.addEventListener('click', () => { output.textContent = ''; });
+
+    var Module = {
+      print: (...args) => appendLog(args.join(' ')),
+      printErr: (...args) => appendLog('[error] ' + args.join(' ')),
+      onRuntimeInitialized: () => {
+        const value = updateControls();
+        requestButton.disabled = value === -2;
+      }
+    };
+  </script>
+
+  {{{ SCRIPT }}}
+</body>
+</html>

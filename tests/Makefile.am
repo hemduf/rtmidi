@@ -33,6 +33,10 @@ testcapi_SOURCES = testcapi.c
 testcapi_LDADD = $(top_builddir)/librtmidi.la
 
 EXTRA_DIST = cmidiin.dsp midiout.dsp midiprobe.dsp qmidiin.dsp	\
-	sysextest.dsp RtMidi.dsw
+	sysextest.dsp RtMidi.dsw \
+	webmidi-pre.js webmidi-smoke.cpp \
+	webmidiprobe.cpp webmidiprobe.html \
+	webmidiin.cpp webmidiin.html \
+	webmidiout.cpp webmidiout.html
 
 TESTS = apinames

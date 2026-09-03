@@ -2,3 +2,6 @@
 # source-package generated via 'git archive'
 .git*      	export-ignore
 /.*		export-ignore
+
+# Keep the tutorial stable after the Web MIDI documentation update.
+doc/doxygen/tutorial.txt text eol=lf

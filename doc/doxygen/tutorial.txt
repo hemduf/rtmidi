@@ -1,6 +1,6 @@
 /*! \mainpage The RtMidi Tutorial
 
-<CENTER>\ref intro &nbsp;&nbsp; \ref download &nbsp;&nbsp; \ref start &nbsp;&nbsp; \ref error &nbsp;&nbsp; \ref probing &nbsp;&nbsp; \ref output &nbsp;&nbsp; \ref input &nbsp;&nbsp; \ref virtual &nbsp;&nbsp; \ref compiling &nbsp;&nbsp; \ref debug &nbsp;&nbsp; \ref multi &nbsp;&nbsp; \ref apinotes &nbsp;&nbsp; \ref acknowledge &nbsp;&nbsp; \ref license</CENTER>
+<CENTER>\ref intro &nbsp;&nbsp; \ref download &nbsp;&nbsp; \ref start &nbsp;&nbsp; \ref error &nbsp;&nbsp; \ref probing &nbsp;&nbsp; \ref output &nbsp;&nbsp; \ref input &nbsp;&nbsp; \ref virtual &nbsp;&nbsp; \ref compiling &nbsp;&nbsp; \ref webmidi &nbsp;&nbsp; \ref debug &nbsp;&nbsp; \ref multi &nbsp;&nbsp; \ref apinotes &nbsp;&nbsp; \ref acknowledge &nbsp;&nbsp; \ref license</CENTER>
 
 \section intro Introduction
 
@@ -11,7 +11,7 @@ RtMidi is a set of C++ classes (RtMidiIn, RtMidiOut and API-specific classes) th
 - only one header and one source file for easy inclusion in programming projects
 - MIDI device enumeration
 
-Where applicable, multiple API support can be compiled and a particular API specified when creating an RtAudio instance.
+Where applicable, multiple API support can be compiled and a particular API specified when creating an RtMidi instance.
 
 MIDI input and output functionality are separated into two classes, RtMidiIn and RtMidiOut.  Each class instance supports only a single MIDI connection.  RtMidi does not provide timing functionality (i.e., output messages are sent immediately).  Input messages are timestamped with delta times in seconds (via a \c double floating point type).  MIDI data is passed to the user as raw bytes using an std::vector<unsigned char>.
 
@@ -201,7 +201,7 @@ The RtMidiIn class provides the RtMidiIn::ignoreTypes() function to specify that
 
 \subsection qmidiin Queued MIDI Input
 
-The RtMidiIn::getMessage() function does not block.  If a MIDI message is available in the queue, it is copied to the user-provided \c std::vector<unsigned char> container.  When no MIDI message is available, the function returns an empty container.  The default maximum MIDI queue size is 1024 messages.  This value may be modified with the RtMidiIn::setQueueSizeLimit() function.  If the maximum queue size limit is reached, subsequent incoming MIDI messages are discarded until the queue size is reduced.
+The RtMidiIn::getMessage() function does not block.  If a MIDI message is available in the queue, it is copied to the user-provided \c std::vector<unsigned char> container.  When no MIDI message is available, the function returns an empty container.  The default maximum MIDI queue size is 1024 messages.  This value may be modified with the RtMidiIn::setQueueSizeLimit() function.  If the maximum queue size limit is reached, subsequent incoming messages are discarded until the queue size is reduced.
 
 In the following example, we omit some necessary error checking and details regarding OS-dependent sleep functions.  For a more complete example, see the \c qmidiin.cpp program in the \c tests directory.
 
@@ -364,6 +364,71 @@ In order to compile RtMidi for a specific OS and API, it is necessary to supply 
 <P>
 
 The example compiler statements above could be used to compile the <TT>midiprobe.cpp</TT> example file, assuming that <TT>midiprobe.cpp</TT>, <TT>RtMidi.h</TT> and <TT>RtMidi.cpp</TT> all exist in the same directory.
+
+\section webmidi WebAssembly / Web MIDI
+
+RtMidi can be compiled to WebAssembly with Emscripten and use the browser Web MIDI API.  When CMake is configured through <TT>emcmake</TT>, the Web MIDI backend is enabled by default and the library defaults to a static build.  It can also be selected explicitly with <TT>-DRTMIDI_API_WEBMIDI=ON</TT>.
+
+Three interactive browser examples are provided:
+
+- <TT>webmidiprobe</TT> is the WebAssembly counterpart of <TT>midiprobe</TT>. It enumerates the compiled RtMidi APIs and the MIDI inputs and outputs exposed by the browser.
+- <TT>webmidiin</TT> is the WebAssembly counterpart of <TT>cmidiin</TT>. It opens a selected MIDI input and displays incoming messages through a RtMidi callback.
+- <TT>webmidiout</TT> is the WebAssembly counterpart of <TT>midiout</TT>. It opens a selected MIDI output and provides a one-octave keyboard, Control Change controls, and an All Notes Off command.
+
+Each C++ example has a custom Emscripten HTML shell in the <TT>tests</TT> directory. The HTML interface explicitly requests Web MIDI permission from a user action and waits for the asynchronous permission request before enumerating ports.
+
+Configure and build all browser applications with:
+
+\code
+emcmake cmake -S . -B build-wasm \
+  -DBUILD_SHARED_LIBS=OFF \
+  -DRTMIDI_API_JACK=OFF \
+  -DRTMIDI_API_ALSA=OFF \
+  -DRTMIDI_API_WEBMIDI=ON \
+  -DRTMIDI_BUILD_TESTING=ON
+
+cmake --build build-wasm \
+  --target webmidiprobe webmidiin webmidiout
+\endcode
+
+Each target generates an HTML, JavaScript, and WebAssembly file in <TT>build-wasm/tests/</TT>:
+
+\code
+webmidiprobe.html
+webmidiprobe.js
+webmidiprobe.wasm
+webmidiin.html
+webmidiin.js
+webmidiin.wasm
+webmidiout.html
+webmidiout.js
+webmidiout.wasm
+\endcode
+
+The generated pages should be served through HTTP rather than opened directly with a <TT>file://</TT> URL. For local development:
+
+\code
+python3 -m http.server 8000 --directory build-wasm/tests
+\endcode
+
+Then open one of the following pages in a browser with Web MIDI support:
+
+\code
+http://localhost:8000/webmidiprobe.html
+http://localhost:8000/webmidiin.html
+http://localhost:8000/webmidiout.html
+\endcode
+
+Use <TT>webmidiprobe</TT> to verify device enumeration. Use <TT>webmidiin</TT> to refresh the MIDI input list, select a port, open it, and inspect incoming MIDI bytes in real time. Use <TT>webmidiout</TT> to refresh the output list, select a port, play notes, send arbitrary Control Change values, and send CC 123 (All Notes Off).
+
+Web MIDI permission is asynchronous. Application code must not assume that ports are available immediately after constructing a RtMidiIn or RtMidiOut Web MIDI instance. Wait until the browser permission request has completed before relying on RtMidiIn::getPortCount(), RtMidiIn::getPortName(), RtMidiOut::getPortCount(), or RtMidiOut::getPortName(). Browser use also normally requires a secure context; <TT>localhost</TT> is appropriate for local testing.
+
+A headless regression test is also provided as <TT>webmidi-smoke</TT>. It runs under Node with a mocked Web MIDI implementation and validates backend selection, port enumeration, MIDI input callback wiring, MIDI output, and port closing:
+
+\code
+cmake --build build-wasm --target webmidi-smoke
+ctest --test-dir build-wasm -R webmidi-smoke --output-on-failure
+\endcode
 
 \section debug Debugging
 

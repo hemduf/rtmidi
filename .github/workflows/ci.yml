@@ -1,6 +1,16 @@
 name: C/C++ CI
 
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rtmidi-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   Linux:
@@ -15,39 +25,49 @@ jobs:
             APIcmake: ALSA
             deps: libasound-dev
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: install dependencies
-      run:
+      run: |
         sudo apt-get update
-        && sudo apt-get install g++ autoconf-archive cmake ${{matrix.deps}}
+        sudo apt-get install -y g++ autoconf-archive cmake ${{ matrix.deps }}
     - name: automake
-      run:
-        env NOCONFIGURE=1 ./autogen.sh && mkdir bld-automake && cd bld-automake
-        && (../configure --with-${{matrix.api}} || (cat config.log; false))
-        && make V=1 && make check
+      run: |
+        env NOCONFIGURE=1 ./autogen.sh
+        mkdir bld-automake
+        cd bld-automake
+        ../configure --with-${{ matrix.api }} || (cat config.log; false)
+        make V=1
+        make check
     - name: CMake
-      run:
-        mkdir bld-cmake && cd bld-cmake
-        && cmake .. -DRTMIDI_API_JACK=OFF -DRTMIDI_API_ALSA=OFF -DRTMIDI_API_${{matrix.APIcmake}}=ON
-        && make VERBOSE=1
+      run: |
+        cmake -S . -B bld-cmake \
+          -DRTMIDI_API_JACK=OFF \
+          -DRTMIDI_API_ALSA=OFF \
+          -DRTMIDI_API_${{ matrix.APIcmake }}=ON
+        cmake --build bld-cmake --verbose
 
   MacOS:
     runs-on: macOS-latest
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: install dependencies
       run: brew install autoconf-archive automake cmake meson libtool
     - name: automake
-      run:
-        env NOCONFIGURE=1 ./autogen.sh && mkdir bld-automake && cd bld-automake
-        && (../configure || (cat config.log; false))
-        && make V=1 && make check
+      run: |
+        env NOCONFIGURE=1 ./autogen.sh
+        mkdir bld-automake
+        cd bld-automake
+        ../configure || (cat config.log; false)
+        make V=1
+        make check
     - name: CMake
-      run: mkdir bld-cmake && cd bld-cmake && cmake .. && make VERBOSE=1
+      run: |
+        cmake -S . -B bld-cmake
+        cmake --build bld-cmake --verbose
 
   MinGW:
     runs-on: ubuntu-latest
@@ -59,16 +79,100 @@ jobs:
           - host: x86_64-w64-mingw32
             api: winmm
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v6
       with:
         fetch-depth: 0
     - name: install dependencies
-      run:
+      run: |
         sudo apt-get update
-        && sudo apt-get install g++-mingw-w64 autoconf-archive
+        sudo apt-get install -y g++-mingw-w64 autoconf-archive
     - name: automake
-      run:
+      run: |
         env NOCONFIGURE=1 ./autogen.sh
-        && mkdir bld-automake && cd bld-automake
-        && (../configure --host=${{matrix.host}} --with-${{matrix.api}} CPPFLAGS=${{matrix.cppflags}} || (cat config.log; false))
-        && make V=1
+        mkdir bld-automake
+        cd bld-automake
+        ../configure --host=${{ matrix.host }} --with-${{ matrix.api }} || (cat config.log; false)
+        make V=1
+
+  WebMIDI:
+    name: WebMIDI backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup Emscripten 6.0.5
+      uses: emscripten-core/setup-emsdk@v15
+      with:
+        version: 6.0.5
+        actions-cache-folder: emsdk-cache
+    - name: Verify Emscripten
+      run: emcc -v
+    - name: Configure
+      run: >
+        emcmake cmake -S . -B bld-webmidi
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=OFF
+        -DRTMIDI_API_JACK=OFF
+        -DRTMIDI_API_ALSA=OFF
+        -DRTMIDI_API_WEBMIDI=ON
+        -DRTMIDI_BUILD_TESTING=ON
+        -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=OFF
+    - name: Build Web MIDI smoke test
+      run: cmake --build bld-webmidi --target webmidi-smoke --parallel
+    - name: Test Web MIDI bridge
+      run: ctest --test-dir bld-webmidi -R '^webmidi-smoke$' --output-on-failure
+
+  WebMIDIExamples:
+    name: WebMIDI example / ${{ matrix.example }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        example:
+          - webmidiprobe
+          - webmidiin
+          - webmidiout
+    steps:
+    - uses: actions/checkout@v6
+      with:
+        fetch-depth: 0
+    - name: Setup Emscripten 6.0.5
+      uses: emscripten-core/setup-emsdk@v15
+      with:
+        version: 6.0.5
+        actions-cache-folder: emsdk-cache
+    - name: Verify Emscripten
+      run: emcc -v
+    - name: Configure Web MIDI examples
+      run: >
+        emcmake cmake -S . -B bld-webmidi
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=OFF
+        -DRTMIDI_API_JACK=OFF
+        -DRTMIDI_API_ALSA=OFF
+        -DRTMIDI_API_WEBMIDI=ON
+        -DRTMIDI_BUILD_TESTING=OFF
+        -DRTMIDI_BUILD_WEBMIDI_EXAMPLES=ON
+    - name: Build ${{ matrix.example }}
+      run: cmake --build bld-webmidi --target ${{ matrix.example }} --parallel
+    - name: Validate ${{ matrix.example }} browser bundle
+      shell: bash
+      run: |
+        set -euo pipefail
+        for extension in html js wasm; do
+          file="bld-webmidi/tests/${{ matrix.example }}.${extension}"
+          test -s "$file"
+          echo "validated $file ($(wc -c < "$file") bytes)"
+        done
+    - name: Upload ${{ matrix.example }} browser bundle
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.example }}-wasm
+        if-no-files-found: error
+        path: |
+          bld-webmidi/tests/${{ matrix.example }}.html
+          bld-webmidi/tests/${{ matrix.example }}.js
+          bld-webmidi/tests/${{ matrix.example }}.wasm

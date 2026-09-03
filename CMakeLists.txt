@@ -20,13 +20,22 @@ if(JACK_LIB OR jack_FOUND)
   set(HAVE_JACK TRUE)
 endif()
 
+# Never select a host JACK installation when cross-compiling to WebAssembly.
+if(EMSCRIPTEN)
+  set(HAVE_JACK FALSE)
+endif()
+
 # Necessary for Windows
 if(WIN32)
   set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 endif()
 
 # Standard CMake options
-option(BUILD_SHARED_LIBS "Build as shared library" ON)
+set(_rtmidi_default_shared ON)
+if(EMSCRIPTEN)
+  set(_rtmidi_default_shared OFF)
+endif()
+option(BUILD_SHARED_LIBS "Build as shared library" ${_rtmidi_default_shared})
 
 if (NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   set_property(CACHE CMAKE_BUILD_TYPE PROPERTY STRINGS "Debug;Release;RelWithDebInfo;MinSizeRel")
@@ -37,6 +46,7 @@ endif()
 
 # Build Options
 set(RTMIDI_TARGETNAME_UNINSTALL "rt_uninstall" CACHE STRING "Name of 'uninstall' build target")
+option(RTMIDI_BUILD_WEBMIDI_EXAMPLES "Include Web MIDI browser examples in the default build." OFF)
 
 # API Options
 option(RTMIDI_API_JACK "Compile with JACK support." ${HAVE_JACK})
@@ -44,6 +54,7 @@ option(RTMIDI_API_WINMM "Compile with WINMM support." ${WIN32})
 option(RTMIDI_API_CORE "Compile with CoreMIDI support." ${APPLE})
 option(RTMIDI_API_ALSA "Compile with ALSA support." ${ALSA})
 option(RTMIDI_API_AMIDI "Compile with Android support." ${ANDROID})
+option(RTMIDI_API_WEBMIDI "Compile with Web MIDI support." ${EMSCRIPTEN})
 
 # Module options
 option(RTMIDI_BUILD_MODULES "Build C++ modules for RtMidi" OFF)
@@ -167,6 +178,23 @@ if(RTMIDI_API_AMIDI)
   list(APPEND LINKLIBS log ${JNI_LIBRARIES} amidi)
 endif()
 
+# Web MIDI
+if(RTMIDI_API_WEBMIDI)
+  if(NOT EMSCRIPTEN)
+    message(FATAL_ERROR "RTMIDI_API_WEBMIDI requires an Emscripten toolchain")
+  endif()
+
+  list(APPEND API_DEFS "-D__WEB_MIDI_API__")
+  list(APPEND API_LIST "web")
+  list(APPEND rtmidi_SOURCES RtMidiWeb.cpp)
+
+  # RtMidi.cpp contains the historical exported Web MIDI callback. Rename only
+  # that free symbol in the legacy translation unit so RtMidiWeb.cpp can supply
+  # corrected input dispatch without changing any class declarations.
+  set_property(SOURCE RtMidi.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "rtmidi_onMidiMessageProc=rtmidi_onMidiMessageProc_legacy")
+endif()
+
 # pthread
 if (NEED_PTHREAD)
   find_package(Threads REQUIRED
@@ -197,6 +225,7 @@ else()
   add_library(rtmidi ${rtmidi_SOURCES})
 endif()
 list(APPEND LIB_TARGETS rtmidi)
+list(GET LIB_TARGETS 0 LIBRTMIDI)
 
 # Add headers destination for install rule.
 set_property(TARGET rtmidi PROPERTY PUBLIC_HEADER "${CMAKE_CURRENT_SOURCE_DIR}/RtMidi.h" "${CMAKE_CURRENT_SOURCE_DIR}/rtmidi_c.h")
@@ -216,8 +245,19 @@ target_include_directories(rtmidi PRIVATE ${INCDIRS}
 # Set compile-time definitions
 target_compile_definitions(rtmidi PRIVATE ${API_DEFS})
 target_compile_definitions(rtmidi PRIVATE RTMIDI_EXPORT)
-target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS} 
+target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS}
                              PRIVATE ${LINKLIBS})
+
+# The historical Web MIDI bridge invokes Module.ccall() and reads
+# Module.HEAPU8 from EM_ASM. Modern Emscripten does not expose either on
+# Module by default. The undefined-symbol linker request also guarantees that
+# RtMidiWeb.cpp is extracted from a static archive even though JavaScript
+# refers to the callback only by name.
+if(RTMIDI_API_WEBMIDI)
+  target_link_options(rtmidi INTERFACE
+    "-sEXPORTED_RUNTIME_METHODS=ccall,HEAPU8"
+    "-Wl,-u,rtmidi_onMidiMessageProc")
+endif()
 
 if(RTMIDI_BUILD_MODULES)
   if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
@@ -233,22 +273,74 @@ option(RTMIDI_BUILD_TESTING "Build test programs" ON)
 if (NOT DEFINED RTMIDI_BUILD_TESTING OR RTMIDI_BUILD_TESTING STREQUAL "")
   set(RTMIDI_BUILD_TESTING ${BUILD_TESTING})
 endif()
-if (RTMIDI_BUILD_TESTING)
+if(RTMIDI_BUILD_TESTING)
   include(CTest)
-  add_executable(cmidiin    tests/cmidiin.cpp)
-  add_executable(midiclock  tests/midiclock.cpp)
-  add_executable(midiout    tests/midiout.cpp)
-  add_executable(midiprobe  tests/midiprobe.cpp)
-  add_executable(qmidiin    tests/qmidiin.cpp)
-  add_executable(sysextest  tests/sysextest.cpp)
-  add_executable(apinames   tests/apinames.cpp)
-  add_executable(testcapi   tests/testcapi.c)
-  list(GET LIB_TARGETS 0 LIBRTMIDI)
-  set_target_properties(cmidiin midiclock midiout midiprobe qmidiin sysextest apinames testcapi
-    PROPERTIES RUNTIME_OUTPUT_DIRECTORY tests
-               INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}
-               LINK_LIBRARIES ${LIBRTMIDI})
-  add_test(NAME apinames COMMAND apinames)
+
+  if(EMSCRIPTEN)
+    if(NOT RTMIDI_API_WEBMIDI)
+      message(FATAL_ERROR "Emscripten tests require RTMIDI_API_WEBMIDI=ON")
+    endif()
+
+    find_program(NODE_EXECUTABLE node REQUIRED)
+    add_executable(webmidi-smoke tests/webmidi-smoke.cpp)
+    target_link_libraries(webmidi-smoke PRIVATE ${LIBRTMIDI})
+    target_link_options(webmidi-smoke PRIVATE
+      "-sENVIRONMENT=node"
+      "-sEXPORTED_FUNCTIONS=_main,_malloc"
+      "--pre-js" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidi-pre.js")
+    set_target_properties(webmidi-smoke PROPERTIES
+      RUNTIME_OUTPUT_DIRECTORY tests)
+    add_test(NAME webmidi-smoke
+      COMMAND ${NODE_EXECUTABLE} $<TARGET_FILE:webmidi-smoke>)
+  else()
+    add_executable(cmidiin    tests/cmidiin.cpp)
+    add_executable(midiclock  tests/midiclock.cpp)
+    add_executable(midiout    tests/midiout.cpp)
+    add_executable(midiprobe  tests/midiprobe.cpp)
+    add_executable(qmidiin    tests/qmidiin.cpp)
+    add_executable(sysextest  tests/sysextest.cpp)
+    add_executable(apinames   tests/apinames.cpp)
+    add_executable(testcapi   tests/testcapi.c)
+    set_target_properties(cmidiin midiclock midiout midiprobe qmidiin sysextest apinames testcapi
+      PROPERTIES RUNTIME_OUTPUT_DIRECTORY tests
+                 INCLUDE_DIRECTORIES ${CMAKE_CURRENT_SOURCE_DIR}
+                 LINK_LIBRARIES ${LIBRTMIDI})
+    add_test(NAME apinames COMMAND apinames)
+  endif()
+endif()
+
+# Browser targets are always available with the Web MIDI API. By default they
+# are excluded from the aggregate build; RTMIDI_BUILD_WEBMIDI_EXAMPLES=ON opts
+# them into the normal "all" target. Explicit --target builds always work.
+if(RTMIDI_API_WEBMIDI)
+  function(rtmidi_add_webmidi_example target source shell exports)
+    if(RTMIDI_BUILD_WEBMIDI_EXAMPLES)
+      add_executable(${target} ${source})
+    else()
+      add_executable(${target} EXCLUDE_FROM_ALL ${source})
+    endif()
+    target_link_libraries(${target} PRIVATE ${LIBRTMIDI})
+    target_link_options(${target} PRIVATE
+      "-sENVIRONMENT=web"
+      "-sEXPORTED_FUNCTIONS=${exports},_malloc"
+      "-sEXIT_RUNTIME=0"
+      "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/${shell}")
+    set_target_properties(${target} PROPERTIES
+      SUFFIX ".html"
+      RUNTIME_OUTPUT_DIRECTORY tests)
+  endfunction()
+
+  rtmidi_add_webmidi_example(
+    webmidiprobe tests/webmidiprobe.cpp tests/webmidiprobe.html
+    "_main,_rtmidi_web_access_state,_rtmidi_web_init,_rtmidi_web_probe")
+
+  rtmidi_add_webmidi_example(
+    webmidiin tests/webmidiin.cpp tests/webmidiin.html
+    "_main,_webmidiin_access_state,_webmidiin_init,_webmidiin_port_count,_webmidiin_port_name,_webmidiin_open,_webmidiin_close")
+
+  rtmidi_add_webmidi_example(
+    webmidiout tests/webmidiout.cpp tests/webmidiout.html
+    "_main,_webmidiout_access_state,_webmidiout_init,_webmidiout_port_count,_webmidiout_port_name,_webmidiout_open,_webmidiout_close,_webmidiout_note_on,_webmidiout_note_off,_webmidiout_cc,_webmidiout_all_notes_off,_webmidiout_panic")
 endif()
 
 # Set standard installation directories.
