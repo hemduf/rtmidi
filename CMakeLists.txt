@@ -248,13 +248,14 @@ target_compile_definitions(rtmidi PRIVATE RTMIDI_EXPORT)
 target_link_libraries(rtmidi PUBLIC ${PUBLICLINKLIBS}
                              PRIVATE ${LINKLIBS})
 
-# The Web MIDI input bridge invokes Module.ccall() from EM_ASM. Modern
-# Emscripten does not export runtime helpers by default. The undefined-symbol
-# linker request also guarantees that RtMidiWeb.cpp is extracted from a static
-# archive even though JavaScript refers to the callback only by name.
+# The historical Web MIDI bridge invokes Module.ccall() and reads
+# Module.HEAPU8 from EM_ASM. Modern Emscripten does not expose either on
+# Module by default. The undefined-symbol linker request also guarantees that
+# RtMidiWeb.cpp is extracted from a static archive even though JavaScript
+# refers to the callback only by name.
 if(RTMIDI_API_WEBMIDI)
   target_link_options(rtmidi INTERFACE
-    "-sEXPORTED_RUNTIME_METHODS=ccall"
+    "-sEXPORTED_RUNTIME_METHODS=ccall,HEAPU8"
     "-Wl,-u,rtmidi_onMidiMessageProc")
 endif()
 
@@ -285,6 +286,7 @@ if(RTMIDI_BUILD_TESTING)
     target_link_libraries(webmidi-smoke PRIVATE ${LIBRTMIDI})
     target_link_options(webmidi-smoke PRIVATE
       "-sENVIRONMENT=node"
+      "-sEXPORTED_FUNCTIONS=_main,_malloc"
       "--pre-js" "${CMAKE_CURRENT_SOURCE_DIR}/tests/webmidi-pre.js")
     set_target_properties(webmidi-smoke PROPERTIES
       RUNTIME_OUTPUT_DIRECTORY tests)
@@ -320,7 +322,7 @@ if(RTMIDI_API_WEBMIDI)
     target_link_libraries(${target} PRIVATE ${LIBRTMIDI})
     target_link_options(${target} PRIVATE
       "-sENVIRONMENT=web"
-      "-sEXPORTED_FUNCTIONS=${exports}"
+      "-sEXPORTED_FUNCTIONS=${exports},_malloc"
       "-sEXIT_RUNTIME=0"
       "--shell-file" "${CMAKE_CURRENT_SOURCE_DIR}/${shell}")
     set_target_properties(${target} PROPERTIES
